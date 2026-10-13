@@ -1,0 +1,21 @@
+mnemonic,opcode,operands,description
+# operands: d = Rd field, a = Ra field, b = Rb field, i = imm6 (signed). Letters are in assembly order.
+# Source: EE340 Sweet16 MCU Instruction Summary, page 2 (instruction register fields). Fields not listed encode as 000.
+SLT,00000,dab,Set if less than (signed)
+ADD,00001,dab,Add
+SUB,00010,dab,Subtract
+AND,00011,dab,Bitwise AND
+OR,00100,dab,Bitwise OR
+XOR,00101,dab,Bitwise XOR
+SLL,00110,da,Shift left logical
+SRL,00111,da,Shift right logical
+IN,01000,d,Input
+LDI,01001,di,Load immediate (imm6 sign-extended)
+J,01010,b,Jump: PC <- PC+Rb
+JZ,01010,ab,Jump if Ra = 0
+JAL,01010,dab,Jump and link: Rd <- PC+1 then as JZ
+JR,01011,a,Jump register (absolute)
+OUT,01100,b,Output
+LD,01101,da,Load Rd <- RAM[Ra]
+ST,01110,ab,Store RAM[Ra] <- Rb
+RESET,11111,,Reset PC
