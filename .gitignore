@@ -1,0 +1,8 @@
+# build products
+sweet16asm
+*.o
+# assembler outputs
+*.lst
+examples/*.hex
+examples/*.bin
+*.exe

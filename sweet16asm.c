@@ -12,7 +12,9 @@
  *   label:  MNEMONIC op, op, op       (label optional, own line or same line)
  *   Registers r0-r7. Numbers: decimal, 0x hex, 0b binary, optional sign.
  *   Directives: .org <addr>   (forward only)     .word <value|label>
+ *   LDW k       whole-word immediate into R7 (k = -16384..16383, or a label address)
  *   Pseudo-ops: NOP | MOV rd,ra | CLR rd | JMP rt,label | JZL ra,rt,label
+ *               LJMP label | LJZ ra,label   (long jumps through R7, built on LDW)
  */
 #include <ctype.h>
 #include <errno.h>
@@ -32,12 +34,15 @@
 #define PREFIX_BITS 0x4000u /* bits 15:14 = 01 on every instruction */
 #define IMM_MIN (-32)
 #define IMM_MAX 31
+#define K_MIN (-16384) /* LDW: sign-extended 15-bit value (types 00 and 11) */
+#define K_MAX 16383
 
 typedef struct {
     char     mnem[NAME_LEN];
     unsigned opcode;
-    char     ops[8]; /* letters from {d,a,b,i}, in assembly order */
+    char     ops[8]; /* letters from {d,a,b,i}, in assembly order; 'k' = whole-word immediate */
     int      nops;
+    bool     whole;  /* LDW-style: no type/opcode fields, the 16-bit word is k itself */
 } IsaEntry;
 
 typedef struct { char name[NAME_LEN]; unsigned addr; int line; } Label;
@@ -145,14 +150,19 @@ static bool load_isa(const char *path)
         memset(&e, 0, sizeof e);
         if (!is_ident(m) || strlen(m) >= sizeof e.mnem) { fprintf(stderr, "%s:%d: bad mnemonic '%s'\n", path, ln, m); ok = false; continue; }
         strcpy(e.mnem, m);
-        if (strlen(o) != 5 || strspn(o, "01") != 5) { fprintf(stderr, "%s:%d: opcode must be 5 binary digits\n", path, ln); ok = false; continue; }
-        e.opcode = (unsigned)strtoul(o, NULL, 2);
         if (strlen(d) >= sizeof e.ops) { fprintf(stderr, "%s:%d: too many operands\n", path, ln); ok = false; continue; }
-        for (k = 0; d[k]; k++) {
-            if (!strchr("dabi", d[k]) || memchr(d, d[k], k)) { fprintf(stderr, "%s:%d: bad operand code '%s'\n", path, ln, d); ok = false; break; }
+        if (strcmp(o, "-") == 0) { /* whole-word instruction (LDW): no opcode field */
+            if (strcmp(d, "k") != 0) { fprintf(stderr, "%s:%d: opcode '-' needs operand code 'k'\n", path, ln); ok = false; continue; }
+            e.whole = true;
+        } else {
+            if (strlen(o) != 5 || strspn(o, "01") != 5) { fprintf(stderr, "%s:%d: opcode must be 5 binary digits (or '-')\n", path, ln); ok = false; continue; }
+            e.opcode = (unsigned)strtoul(o, NULL, 2);
+            for (k = 0; d[k]; k++) {
+                if (!strchr("dabi", d[k]) || memchr(d, d[k], k)) { fprintf(stderr, "%s:%d: bad operand code '%s'\n", path, ln, d); ok = false; break; }
+            }
+            if (d[k]) continue;
+            if (strchr(d, 'i') && (strchr(d, 'a') || strchr(d, 'b'))) { fprintf(stderr, "%s:%d: 'i' overlaps the a/b fields\n", path, ln); ok = false; continue; }
         }
-        if (d[k]) continue;
-        if (strchr(d, 'i') && (strchr(d, 'a') || strchr(d, 'b'))) { fprintf(stderr, "%s:%d: 'i' overlaps the a/b fields\n", path, ln); ok = false; continue; }
         strcpy(e.ops, d); e.nops = (int)strlen(d);
         if (find_isa(e.mnem)) { fprintf(stderr, "%s:%d: duplicate mnemonic %s\n", path, ln, e.mnem); ok = false; continue; }
         if (n_isa == MAX_ISA) { fprintf(stderr, "%s: too many instructions\n", path); ok = false; break; }
@@ -214,7 +224,10 @@ static void define_label(const char *name, unsigned addr, int line)
 }
 
 /* ---------- statement sizing / .org ---------- */
-static bool is_pseudo2(const char *m) { return ieq(m, "JMP") || ieq(m, "JZL"); } /* expand to 2 words */
+static bool is_pseudo2(const char *m) /* pseudo-ops that expand to 2 words */
+{
+    return ieq(m, "JMP") || ieq(m, "JZL") || ieq(m, "LJMP") || ieq(m, "LJZ");
+}
 
 static int stmt_size(const Parsed *p)
 {
@@ -240,6 +253,18 @@ static bool encode_instr(int line, const char *mn, char *const *ops, int nops, u
     unsigned w; int k;
     if (!e) { err(line, "unknown instruction '%s'", mn); return false; }
     if (nops != e->nops) { err(line, "%s takes %d operand(s), got %d", e->mnem, e->nops, nops); return false; }
+    if (e->whole) { /* LDW k: the instruction word is k itself (00.. for k>=0, 11.. for k<0) */
+        long v;
+        if (!parse_num(ops[0], &v)) {
+            int li = find_label(ops[0]);
+            if (li < 0) { err(line, "'%s' is neither a number nor a defined label", ops[0]); return false; }
+            v = (long)labels[li].addr;
+            if (v > K_MAX) { err(line, "label '%s' (address 0x%04lX) does not fit %s (max %d)", ops[0], v, e->mnem, K_MAX); return false; }
+        }
+        if (v < K_MIN || v > K_MAX) { err(line, "%s value %ld out of range (%d..%d)", e->mnem, v, K_MIN, K_MAX); return false; }
+        *out = (uint16_t)(v & 0xFFFF);
+        return true;
+    }
     w = PREFIX_BITS | (e->opcode << 9);
     for (k = 0; k < nops; k++) {
         char f = e->ops[k];
@@ -267,25 +292,38 @@ static void emit(unsigned addr, uint16_t w, int line, const char *src)
     if (listing) fprintf(listing, "%04X: %04X  %s\n", addr, w, src ? src : "");
 }
 
-/* JMP rt,label  ->  LDI rt,(label-addr_of_J) ; J rt        (J is PC-relative) */
+/* JMP rt,label     / JZL ra,rt,label : LDI rt,off ; J rt / JZ ra,rt   reach -32..31
+ * LJMP label        / LJZ ra,label    : LDW off    ; J r7 / JZ ra,r7   reach -16384..16383, overwrites r7
+ * off = label - address of the jump instruction (the jump is the second word, at addr+1). */
 static void do_jump_pseudo(const Parsed *p, unsigned addr, int line, const char *src)
 {
-    bool cond = ieq(p->mnem, "JZL");
-    int want = cond ? 3 : 2, rt;
-    const char *rts, *lab; char num[16], *ldi_ops[2], *j_ops[2];
-    uint16_t w1, w2; int li; long off;
-    if (p->nops != want) { err(line, "%s takes %d operands", p->mnem, want); return; }
-    rts = p->ops[want - 2]; lab = p->ops[want - 1];
-    if (!parse_reg(rts, &rt) || rt == 0) { err(line, "scratch register '%s' must be r1-r7", rts); return; }
+    bool lng  = ieq(p->mnem, "LJMP") || ieq(p->mnem, "LJZ");
+    bool cond = ieq(p->mnem, "JZL")  || ieq(p->mnem, "LJZ");
+    int want = lng ? (cond ? 2 : 1) : (cond ? 3 : 2), li, rt;
+    static char r7s[] = "r7", *rts;
+    const char *lab; char num[16], *first_ops[2], *j_ops[2];
+    long lo = lng ? K_MIN : IMM_MIN, hi = lng ? K_MAX : IMM_MAX, off;
+    uint16_t w1, w2;
+    if (p->nops != want) { err(line, "%s takes %d operand(s)", p->mnem, want); return; }
+    rts = r7s;
+    if (!lng) {
+        rts = p->ops[want - 2];
+        if (!parse_reg(rts, &rt) || rt == 0) { err(line, "scratch register '%s' must be r1-r7", rts); return; }
+    }
+    lab = p->ops[want - 1];
     li = find_label(lab);
     if (li < 0) { err(line, "undefined label '%s'", lab); return; }
-    off = (long)labels[li].addr - (long)(addr + 1); /* J sits at addr+1 */
-    if (off < IMM_MIN || off > IMM_MAX) { err(line, "label '%s' is %ld words away; LDI reaches %d..%d", lab, off, IMM_MIN, IMM_MAX); return; }
+    off = (long)labels[li].addr - (long)(addr + 1); /* the jump sits at addr+1 */
+    if (off < lo || off > hi) {
+        err(line, "label '%s' is %ld words away; %s reaches %ld..%ld%s", lab, off, p->mnem, lo, hi,
+            lng ? "" : " (LJMP/LJZ reach further but overwrite r7)");
+        return;
+    }
     snprintf(num, sizeof num, "%ld", off);
-    ldi_ops[0] = (char *)rts; ldi_ops[1] = num;
-    if (!encode_instr(line, "LDI", ldi_ops, 2, &w1)) return;
-    if (cond) { j_ops[0] = p->ops[0]; j_ops[1] = (char *)rts; if (!encode_instr(line, "JZ", j_ops, 2, &w2)) return; }
-    else      { j_ops[0] = (char *)rts; if (!encode_instr(line, "J", j_ops, 1, &w2)) return; }
+    if (lng) { first_ops[0] = num; if (!encode_instr(line, "LDW", first_ops, 1, &w1)) return; }
+    else     { first_ops[0] = rts; first_ops[1] = num; if (!encode_instr(line, "LDI", first_ops, 2, &w1)) return; }
+    if (cond) { j_ops[0] = p->ops[0]; j_ops[1] = rts; if (!encode_instr(line, "JZ", j_ops, 2, &w2)) return; }
+    else      { j_ops[0] = rts; if (!encode_instr(line, "J", j_ops, 1, &w2)) return; }
     emit(addr, w1, line, src);
     emit(addr + 1, w2, line, NULL);
 }
@@ -362,7 +400,7 @@ static bool write_bin(const char *path)
  * digits for the 64K program ROM (the 256-word microcode ROM uses 2). */
 static bool write_v3(const char *path)
 {
-    FILE *f = fopen(path, "w"); int i;
+    FILE *f = fopen(path, "wb"); int i; /* "wb": keep plain '\n' line endings on Windows too */
     if (!f) return false;
     fputs("v3.0 hex words addressed\n", f);
     for (i = 0; i <= max_addr; i++) {
@@ -418,7 +456,7 @@ int main(int argc, char **argv)
     if (n_errors) { fprintf(stderr, "%d error(s); no output written\n", n_errors); return 1; }
     if (!out) {
         char *dot; snprintf(outbuf, sizeof outbuf, "%s", in);
-        dot = strrchr(outbuf, '.'); if (dot && !strchr(dot, '/')) *dot = '\0';
+        dot = strrchr(outbuf, '.'); if (dot && !strchr(dot, '/') && !strchr(dot, '\\')) *dot = '\0';
         strncat(outbuf, strcmp(fmt, "bin") ? ".hex" : ".bin", sizeof outbuf - strlen(outbuf) - 1);
         out = outbuf;
     }

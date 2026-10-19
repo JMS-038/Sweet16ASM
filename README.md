@@ -5,9 +5,9 @@ Logisim implementation of the Sweet16 microcontroller. It is written in C99,
 uses only the standard C library (no external dependencies), and reads its
 instruction set from a CSV table instead of hard-coding it.
 
-- **Author:** _Joshua Smith_
+- **Author:** Joshua Smith
 - **Course:** EE 340 Computer Architecture, 2026
-- **Machine described by:** *Sweet16 MCU Instruction Summary* (Brad Smith, EE 340, 2026)
+- **Machine described by:** *Sweet16 MCU Instruction Summary* (Brad Smith, EE 340, revision 2026-10-14)
 
 ## Quick start
 
@@ -17,6 +17,12 @@ make                                   # builds ./sweet16asm
 ./sweet16asm -l prog.lst prog.asm      # also writes an address / word / source listing
 make test                              # runs the regression tests
 ```
+
+**Windows without `make`:** install a C compiler (for example `gcc` from MSYS2) and build with
+one command: `gcc -std=c99 -Wall -Wextra -pedantic -O2 -o sweet16asm.exe sweet16asm.c`, then run
+`.\sweet16asm.exe examples\program2.asm` from the repository folder (the ISA table `isa.csv` is read
+from the current directory unless you pass `-i`). `make test` needs a Unix-style shell such as the
+MSYS2 or Git Bash terminal.
 
 The default output is a Logisim `v3.0 hex words addressed` text file. In Logisim,
 load it into the program ROM with the ROM's *Load Image* menu item.
@@ -43,6 +49,7 @@ start:  LDI r2, 1          ; label, instruction, operands separated by commas
 - Registers are `r0` to `r7`. `r0` always reads 0 and ignores writes (per the ISA summary).
 - Numbers are decimal, `0x` hex or `0b` binary, with an optional sign.
 - `LDI` takes a signed 6-bit immediate, so the range is -32 to 31. Anything else is an error.
+- `LDW k` loads a bigger value into **R7**: `k` is -16384 to 16383, or a label (its address, up to 16383).
 - Blank lines, comment-only lines, Windows line endings and `ADD,r1,r2,r3` spacing are accepted.
 
 ### Directives
@@ -63,14 +70,17 @@ These are conveniences built on the real instructions. They are not part of the 
 | `CLR rd` | `ADD rd, r0, r0` | |
 | `JMP rt, label` | `LDI rt, offset` then `J rt` | 2 words. `rt` is an explicit scratch register (r1 to r7). |
 | `JZL ra, rt, label` | `LDI rt, offset` then `JZ ra, rt` | 2 words. Jumps to `label` if `ra` is 0. |
+| `LJMP label` | `LDW offset` then `J r7` | 2 words. Reaches -16384 to 16383 words, but **overwrites R7**. |
+| `LJZ ra, label` | `LDW offset` then `JZ ra, r7` | 2 words. Same reach; overwrites R7. |
 
 **Why jumps need a scratch register.** `J`, `JZ` and `JAL` are register-relative:
 `PC <- PC + R[B]`, where `PC` is the address of the jump instruction itself. A
 label jump therefore has to load the distance into a register first. The
 assembler computes `offset = label - address_of_the_jump` and loads it with
 `LDI`, so the reach is -32 to 31 words from the jump. A label outside that
-range is an error that reports the distance. Using a scratch register
-explicitly means the assembler never silently overwrites one of your registers.
+range is an error that reports the distance and points to `LJMP`/`LJZ`. Using a scratch register
+explicitly means the assembler never silently overwrites one of your registers. `LJMP` and `LJZ`
+use `LDW`, which always loads R7, so R7 is overwritten by definition.
 
 Real listing from `examples/jumps.asm` (the second word of each pair is the jump):
 
@@ -88,10 +98,11 @@ Real listing from `examples/jumps.asm` (the second word of each pair is the jump
 
 ## Instruction set
 
-Instruction word: `01 ooooo ddd aaa bbb`, that is bits 15:14 = `01`, 13:9 = opcode, 8:6 = Rd,
+Ordinary instructions: `01 ooooo ddd aaa bbb`, that is bits 15:14 = `01`, 13:9 = opcode, 8:6 = Rd,
 5:3 = Ra, 2:0 = Rb. `LDI` replaces Ra and Rb with the 6-bit immediate. Fields an
-instruction does not use are encoded as 000. Example encodings are the ones
-printed in the Instruction Summary.
+instruction does not use are encoded as 000. `LDW` is different: it has no opcode field, and the
+word is the value itself (`k` sign-extended from 15 bits: top bits `00` for k >= 0, `11` for k < 0),
+which loads R7. Example encodings are the ones printed in the Instruction Summary.
 
 | Syntax | Opcode | Example | Encoding |
 |---|---|---|---|
@@ -113,6 +124,8 @@ printed in the Instruction Summary.
 | `LD Rd, Ra` | 01101 | `LD R5, R2` | `5B50` |
 | `ST Ra, Rb` | 01110 | `ST R2, R4` | `5C14` |
 | `RESET` | 11111 | `RESET` | `7E00` |
+| `LDW k` | none (types 00 / 11) | `LDW 0x0300` | `0300` |
+| `LDW k` | none | `LDW -1` | `FFFF` |
 
 `J`, `JZ` and `JAL` share opcode 01010 and are told apart by their register
 fields: `J Rb` is `JZ R0, Rb` (R0 is always 0, so it always jumps).
@@ -130,7 +143,9 @@ RESET,11111,,Reset PC
 ```
 
 `operands` lists, in assembly order, which instruction field each operand fills:
-`d` = Rd, `a` = Ra, `b` = Rb, `i` = 6-bit immediate. Fields not listed stay 000. The same
+`d` = Rd, `a` = Ra, `b` = Rb, `i` = 6-bit immediate. Fields not listed stay 000. A whole-word
+instruction such as `LDW` is written with opcode `-` and operand code `k`:
+`LDW,-,k,Load word into R7`. The same
 column drives operand-count checking and encoding, so changing or adding an
 instruction is a one-line edit with no recompile. Lines starting with `#` are comments.
 
@@ -158,30 +173,35 @@ Two passes over the source, in `sweet16asm.c`:
 
 `make test` runs `test.sh`, which checks:
 
-- **The ISA summary's own examples.** All 18 example encodings printed in the
-  Instruction Summary (page 2) are reproduced exactly (`tests/pdf_examples.*`).
+- **The ISA summary's own examples.** All 20 example encodings printed in the
+  Instruction Summary (page 3, revision 2026-10-14, including both `LDW` rows) are
+  reproduced exactly (`tests/pdf_examples.*`).
 - **A real ROM image.** `tests/program_rom_matrix_marshall.expected.hex` is a
   753-word program image saved from the Logisim machine. Its words were
   disassembled to `tests/matrix_marshall.asm`, and reassembling that source
   reproduces the saved file **byte for byte**. All 753 words decode as valid
   Sweet16 instructions.
 - **Every instruction form,** with expected words computed independently from the
-  bit-field table (`tests/vectors.*`), plus the pseudo-ops and the `bin` format.
-- **Error handling:** bad register, immediate out of range, wrong operand count,
-  unknown mnemonic, duplicate or undefined label, jump too far, `.org` backwards,
-  stray comma.
+  bit-field table (`tests/vectors.*`), plus `LDW` limits, the pseudo-ops and the `bin` format.
+- **Error handling:** bad register, immediate out of range (`LDI` and `LDW`), wrong operand
+  count, unknown mnemonic, duplicate or undefined label, jump too far, `.org` backwards,
+  stray comma, malformed ISA table row.
 - **Syntax handling:** comments, Windows line endings, case-insensitivity, label placement.
 
 ## Limitations
 
-- The tests check the encoder and the file format. They do not run the Logisim circuit, so
-  the final check is loading an assembled image into the program ROM and running it.
+- The automated tests check the encoder and the file format. They do not run the Logisim circuit.
+  As a manual check, `examples/smoke_test.asm` was assembled, loaded into the program ROM and run on
+  the machine, and the observed results matched the expected values listed in that file.
 - `matrix_marshall.asm` is disassembler output (no labels or comments). It proves the
   encoder against a real image, not that any particular source text would have produced it.
-- Unused opcodes (15 to 30 in the summary) are not assembler instructions. They can be
-  emitted with `.word`.
-- Label-based jumps reach -32 to 31 words (the `LDI` immediate range). Longer jumps need
-  the offset built in a register by hand, for example with `LDI` and `SLL`.
+- Unused opcodes (15 to 30 in the summary) and the unused type `10` are not assembler
+  instructions. They can be emitted with `.word`.
+- `LDW` always overwrites R7. Per the summary, every word whose top bits are `00` or `11` is an
+  `LDW`, so a zero word in unused ROM executes as `LDW 0` rather than doing nothing. Ending a
+  program with a deliberate halt (for example a jump to itself) is safer than running off the end.
+- `JMP`/`JZL` reach -32 to 31 words (the `LDI` range); `LJMP`/`LJZ` reach -16384 to 16383 words
+  but use R7.
 - Interrupts (the IRQ path) are not built in the machine, so there is no interrupt syntax.
 
 ## Repository layout
@@ -191,7 +211,8 @@ sweet16asm.c   the assembler (single file, C99)
 isa.csv        instruction table loaded at startup
 Makefile       make / make test / make clean
 test.sh        regression tests
-examples/      program2.asm (explicit offsets), jumps.asm (labels and pseudo-ops)
+examples/      program2.asm (explicit offsets), jumps.asm (labels and pseudo-ops),
+               smoke_test.asm (short program to confirm an assembled image runs in Logisim)
 tests/         fixtures: PDF examples, vectors, and the matrix_marshall ROM round trip
 ```
 

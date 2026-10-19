@@ -1,6 +1,7 @@
 mnemonic,opcode,operands,description
 # operands: d = Rd field, a = Ra field, b = Rb field, i = imm6 (signed). Letters are in assembly order.
-# Source: EE340 Sweet16 MCU Instruction Summary, page 2 (instruction register fields). Fields not listed encode as 000.
+# Source: EE340 Sweet16 MCU Instruction Summary, revision 2026-10-14 (pages 1-3). Fields not listed encode as 000.
+# opcode '-' with operands 'k' = whole-word instruction (LDW): no type/opcode fields, the 16-bit word is k & 0xFFFF.
 SLT,00000,dab,Set if less than (signed)
 ADD,00001,dab,Add
 SUB,00010,dab,Subtract
@@ -19,3 +20,4 @@ OUT,01100,b,Output
 LD,01101,da,Load Rd <- RAM[Ra]
 ST,01110,ab,Store RAM[Ra] <- Rb
 RESET,11111,,Reset PC
+LDW,-,k,Load word into R7 (k -16384..16383)

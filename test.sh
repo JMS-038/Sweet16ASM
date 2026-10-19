@@ -5,9 +5,9 @@ ASM=./sweet16asm; fail=0; T=$(mktemp -d)
 ok()  { echo "PASS  $1"; }
 bad() { echo "FAIL  $1"; fail=1; }
 
-# 1. The 18 example encodings printed in the instruction-summary PDF (page 2)
+# 1. The 20 example encodings printed in the Instruction Summary (page 3, revision 2026-10-14)
 $ASM -l $T/p.lst -o $T/p.hex tests/pdf_examples.asm >/dev/null || bad "pdf examples: assemble"
-cut -c1-10 $T/p.lst | diff -q - tests/pdf_examples.expected >/dev/null && ok "PDF example encodings (18 rows)" || bad "PDF example encodings differ"
+cut -c1-10 $T/p.lst | diff -q - tests/pdf_examples.expected >/dev/null && ok "PDF example encodings (20 rows, incl. LDW)" || bad "PDF example encodings differ"
 
 # 2. Every instruction form, expected words computed independently from the bit-field table
 $ASM -l $T/v.lst -o $T/v.hex tests/vectors.asm >/dev/null || bad "vectors: assemble"
@@ -41,6 +41,11 @@ expect_err "undefined label"   'JMP r1, nowhere\n'       'undefined label'
 expect_err "scratch r0"        'x: JMP r0, x\n'          'r1-r7'
 expect_err "trailing comma"    'ADD r1, r2,\n'           'empty operand'
 expect_err "jump out of range" 'a: NOP\n.org 100\nJMP r1, a\n' 'words away'
+expect_err "LDW too big"       'LDW 16384\n'           'out of range'
+expect_err "LDW too small"     'LDW -16385\n'          'out of range'
+expect_err "LDW label too far" '.org 20000\ny: NOP\nLDW y\n' 'does not fit'
+expect_err "JMP hints LJMP"    'a: NOP\n.org 100\nJMP r1, a\n' 'LJMP'
+expect_err "LJMP out of range" 'LJMP a\n.org 20000\na: NOP\n' 'words away'
 expect_err "org backwards"     'NOP\nNOP\n.org 1\n'      'backwards'
 
 # 7. Syntax: comments, CRLF, label on its own line, no-space comma form, case-insensitivity
@@ -52,6 +57,21 @@ $ASM -l $T/s.lst -o $T/s.hex $T/s.asm >/dev/null && [ "$(cut -c7-10 $T/s.lst | s
 printf 'a: NOP\nJMP r1, a\n' > $T/j.asm
 $ASM -l $T/j.lst -o $T/j.hex $T/j.asm >/dev/null && [ "$(sed -n 2p $T/j.lst | cut -c7-10)" = "527E" ] && [ "$(sed -n 3p $T/j.lst | cut -c7-10)" = "5401" ] \
   && ok "JMP offset (LDI r1,-2 ; J r1)" || bad "JMP offset"
+
+# 9. LDW with a label operand, and the long jumps (LDW off ; J r7 / JZ ra,r7). off = label - address of the jump
+printf '.org 0x100\nx: NOP\nLDW x\n' > $T/l.asm
+$ASM -l $T/l.lst -o $T/l.hex $T/l.asm >/dev/null && [ "$(sed -n 2p $T/l.lst | cut -c1-10)" = "0101: 0100" ] && ok "LDW label operand" || bad "LDW label operand"
+printf 'a: NOP\n.org 40\nLJMP a\n' > $T/lj.asm   # LDW at 0x28, J at 0x29: off = 0-41 = -41 = 0xFFD7
+$ASM -l $T/lj.lst -o $T/lj.hex $T/lj.asm >/dev/null && [ "$(sed -n 2p $T/lj.lst | cut -c1-10)" = "0028: FFD7" ] && [ "$(sed -n 3p $T/lj.lst | cut -c1-10)" = "0029: 5407" ] \
+  && ok "LJMP (LDW off ; J r7)" || bad "LJMP"
+printf 'a: NOP\nLJZ r2, a\n' > $T/lz.asm        # LDW at 1, JZ at 2: off = 0-2 = -2 = 0xFFFE
+$ASM -l $T/lz.lst -o $T/lz.hex $T/lz.asm >/dev/null && [ "$(sed -n 2p $T/lz.lst | cut -c1-10)" = "0001: FFFE" ] && [ "$(sed -n 3p $T/lz.lst | cut -c1-10)" = "0002: 5417" ] \
+  && ok "LJZ (LDW off ; JZ ra,r7)" || bad "LJZ"
+
+# 10. ISA table rule: opcode '-' (whole-word) must use operand code 'k'
+printf 'mnemonic,opcode,operands\nFOO,-,dab\n' > $T/bad.csv; printf 'NOP\n' > $T/n.asm
+if $ASM -i $T/bad.csv -o $T/n.hex $T/n.asm 2>$T/c.err >/dev/null; then bad "bad ISA row accepted"
+elif grep -q "needs operand code" $T/c.err; then ok "ISA table validation"; else bad "ISA table message"; fi
 
 rm -rf $T
 [ $fail -eq 0 ] && echo "ALL TESTS PASSED" || { echo "SOME TESTS FAILED"; exit 1; }
