@@ -1,7 +1,15 @@
 #!/bin/sh
 # Regression tests for sweet16asm. Run from this directory after `make` (or just `make test`).
 cd "$(dirname "$0")" || exit 1
-ASM=./sweet16asm; fail=0; T=$(mktemp -d)
+for tool in cmp diff cut sed grep wc mktemp; do
+  command -v $tool >/dev/null 2>&1 || { echo "test.sh needs '$tool'. In MSYS2 run: pacman -S diffutils coreutils sed grep"; exit 1; }
+done
+for f in tests/pdf_examples.asm tests/pdf_examples.expected tests/vectors.asm tests/vectors.expected \
+         tests/matrix_marshall.asm tests/program_rom_matrix_marshall.expected.hex tests/program2.expected.bin \
+         examples/program2.asm isa.csv; do
+  [ -f "$f" ] || { echo "test.sh: missing file '$f' (copy the whole repository folder, including tests/)"; exit 1; }
+done
+ASM=./sweet16asm; [ -f ./sweet16asm.exe ] && ASM=./sweet16asm.exe; fail=0; T=$(mktemp -d)
 ok()  { echo "PASS  $1"; }
 bad() { echo "FAIL  $1"; fail=1; }
 
@@ -50,7 +58,7 @@ expect_err "org backwards"     'NOP\nNOP\n.org 1\n'      'backwards'
 
 # 7. Syntax: comments, CRLF, label on its own line, no-space comma form, case-insensitivity
 printf 'top:\r\n  add R1,r2,R3 ; c, with, commas\r\n; only a comment\r\n\r\nADD,r1,r2,r3\r\n' > $T/s.asm
-$ASM -l $T/s.lst -o $T/s.hex $T/s.asm >/dev/null && [ "$(cut -c7-10 $T/s.lst | sort -u)" = "4253" ] && [ "$(wc -l < $T/s.lst)" -eq 2 ] \
+$ASM -l $T/s.lst -o $T/s.hex $T/s.asm >/dev/null && [ "$(sed -n 1p $T/s.lst | cut -c7-10)" = "4253" ] && [ "$(sed -n 2p $T/s.lst | cut -c7-10)" = "4253" ] && [ "$(wc -l < $T/s.lst)" -eq 2 ] \
   && ok "comments / CRLF / case / comma forms" || bad "syntax handling"
 
 # 8. Backward jump label resolves relative to the J's own address (J at 0002, label at 0000 -> -2)
