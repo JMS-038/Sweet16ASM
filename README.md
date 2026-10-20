@@ -18,11 +18,14 @@ make                                   # builds ./sweet16asm
 make test                              # runs the regression tests
 ```
 
-**Windows without `make`:** install a C compiler (for example `gcc` from MSYS2) and build with
-one command: `gcc -std=c99 -Wall -Wextra -pedantic -O2 -o sweet16asm.exe sweet16asm.c`, then run
-`.\sweet16asm.exe examples\program2.asm` from the repository folder (the ISA table `isa.csv` is read
-from the current directory unless you pass `-i`). `make test` needs a Unix-style shell such as the
-MSYS2 or Git Bash terminal.
+**Windows:** install MSYS2 (`winget install MSYS2.MSYS2`), then in the *MSYS2 UCRT64* terminal run
+`pacman -S mingw-w64-ucrt-x86_64-gcc make diffutils`. In that terminal, `cd /c/path/to/this/repo` and use
+`make` and `make test` exactly as above. To use `make` from PowerShell, add `C:\msys64\ucrt64\bin` and
+`C:\msys64\usr\bin` to your Path (in that order). The Makefile picks `gcc` and the `.exe` name
+automatically on Windows. Without `make`, one command also works:
+`gcc -std=c99 -Wall -Wextra -pedantic -O2 -o sweet16asm.exe sweet16asm.c`, then
+`.\sweet16asm.exe examples\program2.asm` from the repository folder (the ISA table `isa.csv` is read from
+the current directory unless you pass `-i`). `make test` needs a Unix-style shell, which the MSYS2 terminal provides.
 
 The default output is a Logisim `v3.0 hex words addressed` text file. In Logisim,
 load it into the program ROM with the ROM's *Load Image* menu item.
