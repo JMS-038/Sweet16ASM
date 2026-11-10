@@ -1,19 +1,62 @@
-name: Makefile CI/CD Check
+name: CI
 
 on:
+  # Pull requests into either long-lived branch.
   pull_request:
-    branches: [ "main", "develop" ]
+    branches: ["main", "develop"]
+  # Direct pushes and merges are tested too (develop = untested work, main = live code).
+  push:
+    branches: ["main", "develop"]
+  # Allows a manual run from the Actions tab.
+  workflow_dispatch:
+
+# Least privilege: this workflow only needs to read the repository.
+permissions:
+  contents: read
+
+# Cancel a still-running job when a newer commit hits the same branch or PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-test:
-
+    name: Build and test (${{ matrix.cc }})
     runs-on: ubuntu-latest
-
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false # a failure under one compiler should not hide the other's result
+      matrix:
+        cc: [gcc, clang]
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Build main
-      run: make 
+      - name: Compiler version
+        run: ${{ matrix.cc }} --version
 
-    - name: Run Test suite
-      run: make test
+      - name: Build
+        run: make CC=${{ matrix.cc }}
+
+      - name: Run test suite
+        run: make test
+
+  sanitizers:
+    name: Build and test (ASan + UBSan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build with sanitizers and -Werror
+        run: >
+          make CC=gcc
+          CFLAGS="-std=c99 -Wall -Wextra -pedantic -Werror -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer"
+
+      - name: Run test suite under sanitizers
+        env:
+          # Leak checking is off for now: main() never frees its line buffer and
+          # strings at exit, which LeakSanitizer reports. Remove this line after
+          # those allocations are freed.
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: make test
