@@ -1,0 +1,7 @@
+# Keep the line endings of the committed files identical on every platform.
+# The tests compare assembler output to fixtures byte for byte, and test.sh is a
+# POSIX shell script, so Windows checkouts must not convert these files to CRLF.
+* text=auto eol=lf
+
+# The raw 64K-word image is binary: never touch its bytes.
+*.bin binary
