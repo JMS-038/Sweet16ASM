@@ -1,0 +1,19 @@
+name: Makefile CI/CD Check
+
+on:
+  pull_request:
+    branches: [ "main", "develop" ]
+
+jobs:
+  build-and-test:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Build main
+     run: make 
+
+    - name: Run Test suite
+    run: make test
