@@ -61,34 +61,34 @@ jobs:
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: make test
 
-    windows:
-      name: Build and test (Windows, MSYS2 UCRT64)
-      runs-on: windows-latest
-      timeout-minutes: 15 # Takes more time to setup MSYS2 shell
-      defaults:
-        run:
-          # Run every step inside the MSYS2 shell, as the README instructs.
-          shell: msys2 {0}
-      steps:
-        - uses: actions/checkout@v4
-  
-        - uses: msys2/setup-msys2@v2
-          with:
-            msystem: UCRT64
-            update: false
-            # Same packages as the README. test.sh also needs cmp/diff (diffutils);
-            # sed, grep, cut, wc and mktemp ship with the MSYS2 base install.
-            install: >-
-              mingw-w64-ucrt-x86_64-gcc
-              make
-              diffutils
-  
-        - name: Compiler version
-          run: gcc --version
-  
-        - name: Build
-          run: make
-  
-        - name: Run test suite
-          run: make test
+  windows:
+    name: Build and test (Windows, MSYS2 UCRT64)
+    runs-on: windows-latest
+    timeout-minutes: 15 # Takes more time to setup MSYS2 shell
+    defaults:
+      run:
+        # Run every step inside the MSYS2 shell, as the README instructs.
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          # Same packages as the README. test.sh also needs cmp/diff (diffutils);
+          # sed, grep, cut, wc and mktemp ship with the MSYS2 base install.
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            make
+            diffutils
+
+      - name: Compiler version
+        run: gcc --version
+
+      - name: Build
+        run: make
+
+      - name: Run test suite
+        run: make test
  
