@@ -1,5 +1,5 @@
 /*
- * sweet16asm.c - two-pass assembler for the EE340 Sweet16 MCU.
+ * main.c - two-pass assembler for the EE340 Sweet16 MCU.
  * Standard C99 library only.
  *
  * Instruction word: 01-ooooo-ddd-aaa-bbb   (LDI: 01-01001-ddd-iiiiii)

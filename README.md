@@ -23,7 +23,7 @@ make test                              # runs the regression tests
 `make` and `make test` exactly as above. To use `make` from PowerShell, add `C:\msys64\ucrt64\bin` and
 `C:\msys64\usr\bin` to your Path (in that order). The Makefile picks `gcc` and the `.exe` name
 automatically on Windows. Without `make`, one command also works:
-`gcc -std=c99 -Wall -Wextra -pedantic -O2 -o sweet16asm.exe sweet16asm.c`, then
+`gcc -std=c99 -Wall -Wextra -pedantic -O2 -o sweet16asm.exe src/main.c`, then
 `.\sweet16asm.exe examples\program2.asm` from the repository folder (the ISA table `isa.csv` is read from
 the current directory unless you pass `-i`). `make test` needs a Unix-style shell, which the MSYS2 terminal provides.
 
@@ -162,7 +162,7 @@ instruction is a one-line edit with no recompile. Lines starting with `#` are co
 
 ## How it works
 
-Two passes over the source, in `sweet16asm.c`:
+Two passes over the source, in `src/main.c`:
 
 1. **Pass 1** tokenizes each line (strip the comment, split off an optional label,
    split operands on commas), assigns an address to every statement, and records
@@ -210,7 +210,7 @@ Two passes over the source, in `sweet16asm.c`:
 ## Repository layout
 
 ```
-sweet16asm.c   the assembler (single file, C99)
+src/main.c     the assembler (single file, C99)
 isa.csv        instruction table loaded at startup
 Makefile       make / make test / make clean
 test.sh        regression tests

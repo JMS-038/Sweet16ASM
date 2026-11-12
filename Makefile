@@ -9,7 +9,7 @@ endif
 CFLAGS ?= -std=c99 -Wall -Wextra -pedantic -O2
 TARGET  = sweet16asm$(EXE)
 
-$(TARGET): sweet16asm.c
+$(TARGET): src/main.c
 	$(CC) $(CFLAGS) -o $@ $<
 
 test: $(TARGET)
