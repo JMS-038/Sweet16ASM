@@ -1,5 +1,5 @@
 /*
- * main.c - two-pass assembler for the EE340 Sweet16 MCU.
+ * sweet16asm.c - two-pass assembler for the EE340 Sweet16 MCU.
  * Standard C99 library only.
  *
  * Instruction word: 01-ooooo-ddd-aaa-bbb   (LDI: 01-01001-ddd-iiiiii)
@@ -59,40 +59,40 @@ static IsaEntry isa[MAX_ISA];   static int n_isa;
 static Label    labels[MAX_LABELS]; static int n_labels;
 static uint16_t mem[MEM_WORDS]; static bool used[MEM_WORDS];
 static int      max_addr = -1;
-static int      n_errors;
-static const char *src_name = "";
+static int      errorCount;
+static const char *sourceName = "";
 static FILE    *listing;
 
 /* ---------- small helpers ---------- */
-static void err(int line, const char *fmt, ...)
+static void ReportError(int lineNumber, const char *format, ...)
 {
-    va_list ap;
-    fprintf(stderr, "%s:%d: error: ", src_name, line);
-    va_start(ap, fmt); vfprintf(stderr, fmt, ap); va_end(ap);
+    va_list arguments;
+    fprintf(stderr, "%s:%d: error: ", sourceName, lineNumber);
+    va_start(arguments, format); vfprintf(stderr, format, arguments); va_end(arguments);
     fputc('\n', stderr);
-    n_errors++;
+    errorCount++;
 }
 
-static char *trim(char *s)
+static char *TrimWhitespace(char *text)
 {
-    char *e;
-    while (isspace((unsigned char)*s)) s++;
-    e = s + strlen(s);
-    while (e > s && isspace((unsigned char)e[-1])) *--e = '\0';
-    return s;
+    char *end;
+    while (isspace((unsigned char)*text)) text++;
+    end = text + strlen(text);
+    while (end > text && isspace((unsigned char)end[-1])) *--end = '\0';
+    return text;
 }
 
-static bool ieq(const char *a, const char *b)
+static bool EqualsIgnoreCase(const char *first, const char *second)
 {
-    for (; *a && *b; a++, b++)
-        if (toupper((unsigned char)*a) != toupper((unsigned char)*b)) return false;
-    return *a == *b;
+    for (; *first && *second; first++, second++)
+        if (toupper((unsigned char)*first) != toupper((unsigned char)*second)) return false;
+    return *first == *second;
 }
 
-static bool is_ident(const char *s)
+static bool IsIdentifier(const char *text)
 {
-    if (!(isalpha((unsigned char)*s) || *s == '_')) return false;
-    for (; *s; s++) if (!(isalnum((unsigned char)*s) || *s == '_')) return false;
+    if (!(isalpha((unsigned char)*text) || *text == '_')) return false;
+    for (; *text; text++) if (!(isalnum((unsigned char)*text) || *text == '_')) return false;
     return true;
 }
 
@@ -122,7 +122,7 @@ static bool parse_num(const char *s, long *out)
 static const IsaEntry *find_isa(const char *m)
 {
     int i;
-    for (i = 0; i < n_isa; i++) if (ieq(isa[i].mnem, m)) return &isa[i];
+    for (i = 0; i < n_isa; i++) if (EqualsIgnoreCase(isa[i].mnem, m)) return &isa[i];
     return NULL;
 }
 
@@ -132,7 +132,7 @@ static bool load_isa(const char *path)
     char buf[LINE_LEN]; int ln = 0; bool ok = true;
     if (!f) { fprintf(stderr, "cannot open ISA table '%s' (use -i <file>)\n", path); return false; }
     while (fgets(buf, sizeof buf, f)) {
-        char *s = trim(buf), *fld[3] = {NULL, NULL, NULL}, *p, *c, *m, *o, *d;
+        char *s = TrimWhitespace(buf), *fld[3] = {NULL, NULL, NULL}, *p, *c, *m, *o, *d;
         int nf = 0; size_t k; IsaEntry e;
         ln++;
         if (!*s || *s == '#') continue;
@@ -143,12 +143,12 @@ static bool load_isa(const char *path)
             if (!c) break;
             *c = '\0'; p = c + 1;
         }
-        m = trim(fld[0]);
-        if (ieq(m, "mnemonic")) continue; /* header row */
+        m = TrimWhitespace(fld[0]);
+        if (EqualsIgnoreCase(m, "mnemonic")) continue; /* header row */
         if (nf < 2) { fprintf(stderr, "%s:%d: need mnemonic,opcode,operands\n", path, ln); ok = false; continue; }
-        o = trim(fld[1]); d = nf > 2 ? trim(fld[2]) : (char *)"";
+        o = TrimWhitespace(fld[1]); d = nf > 2 ? TrimWhitespace(fld[2]) : (char *)"";
         memset(&e, 0, sizeof e);
-        if (!is_ident(m) || strlen(m) >= sizeof e.mnem) { fprintf(stderr, "%s:%d: bad mnemonic '%s'\n", path, ln, m); ok = false; continue; }
+        if (!IsIdentifier(m) || strlen(m) >= sizeof e.mnem) { fprintf(stderr, "%s:%d: bad mnemonic '%s'\n", path, ln, m); ok = false; continue; }
         strcpy(e.mnem, m);
         if (strlen(d) >= sizeof e.ops) { fprintf(stderr, "%s:%d: too many operands\n", path, ln); ok = false; continue; }
         if (strcmp(o, "-") == 0) { /* whole-word instruction (LDW): no opcode field */
@@ -177,26 +177,26 @@ static void parse_line(char *buf, int line, Parsed *p, bool report)
 {
     char *s, *colon, *c, *o; size_t n;
     memset(p, 0, sizeof *p); p->ok = true;
-#define FAIL(...) do { if (report) err(line, __VA_ARGS__); p->ok = false; return; } while (0)
+#define FAIL(...) do { if (report) ReportError(line, __VA_ARGS__); p->ok = false; return; } while (0)
     if ((c = strchr(buf, ';')) != NULL) *c = '\0';
-    s = trim(buf);
+    s = TrimWhitespace(buf);
     if ((colon = strchr(s, ':')) != NULL) {
-        char *lab; *colon = '\0'; lab = trim(s);
-        if (!is_ident(lab) || strlen(lab) >= NAME_LEN) FAIL("invalid label '%s'", lab);
+        char *lab; *colon = '\0'; lab = TrimWhitespace(s);
+        if (!IsIdentifier(lab) || strlen(lab) >= NAME_LEN) FAIL("invalid label '%s'", lab);
         strcpy(p->label, lab); p->has_label = true;
-        s = trim(colon + 1);
+        s = TrimWhitespace(colon + 1);
         if (strchr(s, ':')) FAIL("only one label per line");
     }
     if (!*s) return;
     n = strcspn(s, " \t,");
     if (n >= NAME_LEN) FAIL("mnemonic too long");
     memcpy(p->mnem, s, n); p->mnem[n] = '\0'; p->has_mnem = true;
-    s = trim(s + n);
-    if (*s == ',') s = trim(s + 1);
+    s = TrimWhitespace(s + n);
+    if (*s == ',') s = TrimWhitespace(s + 1);
     if (!*s) return;
     for (;;) {
         c = strchr(s, ','); if (c) *c = '\0';
-        o = trim(s);
+        o = TrimWhitespace(s);
         if (!*o) FAIL("empty operand");
         if (p->nops == MAX_OPS) FAIL("too many operands");
         p->ops[p->nops++] = o;
@@ -217,8 +217,8 @@ static int find_label(const char *name)
 static void define_label(const char *name, unsigned addr, int line)
 {
     int i = find_label(name);
-    if (i >= 0) { err(line, "label '%s' already defined on line %d", name, labels[i].line); return; }
-    if (n_labels == MAX_LABELS) { err(line, "too many labels"); return; }
+    if (i >= 0) { ReportError(line, "label '%s' already defined on line %d", name, labels[i].line); return; }
+    if (n_labels == MAX_LABELS) { ReportError(line, "too many labels"); return; }
     strcpy(labels[n_labels].name, name); labels[n_labels].addr = addr; labels[n_labels].line = line;
     n_labels++;
 }
@@ -226,12 +226,12 @@ static void define_label(const char *name, unsigned addr, int line)
 /* ---------- statement sizing / .org ---------- */
 static bool is_pseudo2(const char *m) /* pseudo-ops that expand to 2 words */
 {
-    return ieq(m, "JMP") || ieq(m, "JZL") || ieq(m, "LJMP") || ieq(m, "LJZ");
+    return EqualsIgnoreCase(m, "JMP") || EqualsIgnoreCase(m, "JZL") || EqualsIgnoreCase(m, "LJMP") || EqualsIgnoreCase(m, "LJZ");
 }
 
 static int stmt_size(const Parsed *p)
 {
-    if (!p->has_mnem || ieq(p->mnem, ".org")) return 0;
+    if (!p->has_mnem || EqualsIgnoreCase(p->mnem, ".org")) return 0;
     return is_pseudo2(p->mnem) ? 2 : 1;
 }
 
@@ -239,10 +239,10 @@ static void step_org(const Parsed *p, unsigned *addr, int line, bool report)
 {
     long v;
     if (p->nops != 1 || !parse_num(p->ops[0], &v) || v < 0 || v >= MEM_WORDS) {
-        if (report) err(line, ".org needs one address in 0..65535");
+        if (report) ReportError(line, ".org needs one address in 0..65535");
         return;
     }
-    if ((unsigned)v < *addr) { if (report) err(line, ".org cannot move backwards (at 0x%04X)", *addr); return; }
+    if ((unsigned)v < *addr) { if (report) ReportError(line, ".org cannot move backwards (at 0x%04X)", *addr); return; }
     *addr = (unsigned)v;
 }
 
@@ -251,17 +251,17 @@ static bool encode_instr(int line, const char *mn, char *const *ops, int nops, u
 {
     const IsaEntry *e = find_isa(mn);
     unsigned w; int k;
-    if (!e) { err(line, "unknown instruction '%s'", mn); return false; }
-    if (nops != e->nops) { err(line, "%s takes %d operand(s), got %d", e->mnem, e->nops, nops); return false; }
+    if (!e) { ReportError(line, "unknown instruction '%s'", mn); return false; }
+    if (nops != e->nops) { ReportError(line, "%s takes %d operand(s), got %d", e->mnem, e->nops, nops); return false; }
     if (e->whole) { /* LDW k: the instruction word is k itself (00.. for k>=0, 11.. for k<0) */
         long v;
         if (!parse_num(ops[0], &v)) {
             int li = find_label(ops[0]);
-            if (li < 0) { err(line, "'%s' is neither a number nor a defined label", ops[0]); return false; }
+            if (li < 0) { ReportError(line, "'%s' is neither a number nor a defined label", ops[0]); return false; }
             v = (long)labels[li].addr;
-            if (v > K_MAX) { err(line, "label '%s' (address 0x%04lX) does not fit %s (max %d)", ops[0], v, e->mnem, K_MAX); return false; }
+            if (v > K_MAX) { ReportError(line, "label '%s' (address 0x%04lX) does not fit %s (max %d)", ops[0], v, e->mnem, K_MAX); return false; }
         }
-        if (v < K_MIN || v > K_MAX) { err(line, "%s value %ld out of range (%d..%d)", e->mnem, v, K_MIN, K_MAX); return false; }
+        if (v < K_MIN || v > K_MAX) { ReportError(line, "%s value %ld out of range (%d..%d)", e->mnem, v, K_MIN, K_MAX); return false; }
         *out = (uint16_t)(v & 0xFFFF);
         return true;
     }
@@ -270,12 +270,12 @@ static bool encode_instr(int line, const char *mn, char *const *ops, int nops, u
         char f = e->ops[k];
         if (f == 'i') {
             long v;
-            if (!parse_num(ops[k], &v)) { err(line, "'%s' is not a number", ops[k]); return false; }
-            if (v < IMM_MIN || v > IMM_MAX) { err(line, "immediate %ld out of range (%d..%d)", v, IMM_MIN, IMM_MAX); return false; }
+            if (!parse_num(ops[k], &v)) { ReportError(line, "'%s' is not a number", ops[k]); return false; }
+            if (v < IMM_MIN || v > IMM_MAX) { ReportError(line, "immediate %ld out of range (%d..%d)", v, IMM_MIN, IMM_MAX); return false; }
             w |= (unsigned)(v & 0x3F);
         } else {
             int r;
-            if (!parse_reg(ops[k], &r)) { err(line, "'%s' is not a register (r0-r7)", ops[k]); return false; }
+            if (!parse_reg(ops[k], &r)) { ReportError(line, "'%s' is not a register (r0-r7)", ops[k]); return false; }
             w |= (unsigned)r << (f == 'd' ? 6 : f == 'a' ? 3 : 0);
         }
     }
@@ -285,8 +285,8 @@ static bool encode_instr(int line, const char *mn, char *const *ops, int nops, u
 
 static void emit(unsigned addr, uint16_t w, int line, const char *src)
 {
-    if (addr >= MEM_WORDS) { err(line, "program exceeds 64K words"); return; }
-    if (used[addr]) { err(line, "address 0x%04X already written", addr); return; }
+    if (addr >= MEM_WORDS) { ReportError(line, "program exceeds 64K words"); return; }
+    if (used[addr]) { ReportError(line, "address 0x%04X already written", addr); return; }
     mem[addr] = w; used[addr] = true;
     if ((int)addr > max_addr) max_addr = (int)addr;
     if (listing) fprintf(listing, "%04X: %04X  %s\n", addr, w, src ? src : "");
@@ -297,25 +297,25 @@ static void emit(unsigned addr, uint16_t w, int line, const char *src)
  * off = label - address of the jump instruction (the jump is the second word, at addr+1). */
 static void do_jump_pseudo(const Parsed *p, unsigned addr, int line, const char *src)
 {
-    bool lng  = ieq(p->mnem, "LJMP") || ieq(p->mnem, "LJZ");
-    bool cond = ieq(p->mnem, "JZL")  || ieq(p->mnem, "LJZ");
+    bool lng  = EqualsIgnoreCase(p->mnem, "LJMP") || EqualsIgnoreCase(p->mnem, "LJZ");
+    bool cond = EqualsIgnoreCase(p->mnem, "JZL")  || EqualsIgnoreCase(p->mnem, "LJZ");
     int want = lng ? (cond ? 2 : 1) : (cond ? 3 : 2), li, rt;
     static char r7s[] = "r7", *rts;
     const char *lab; char num[16], *first_ops[2], *j_ops[2];
     long lo = lng ? K_MIN : IMM_MIN, hi = lng ? K_MAX : IMM_MAX, off;
     uint16_t w1, w2;
-    if (p->nops != want) { err(line, "%s takes %d operand(s)", p->mnem, want); return; }
+    if (p->nops != want) { ReportError(line, "%s takes %d operand(s)", p->mnem, want); return; }
     rts = r7s;
     if (!lng) {
         rts = p->ops[want - 2];
-        if (!parse_reg(rts, &rt) || rt == 0) { err(line, "scratch register '%s' must be r1-r7", rts); return; }
+        if (!parse_reg(rts, &rt) || rt == 0) { ReportError(line, "scratch register '%s' must be r1-r7", rts); return; }
     }
     lab = p->ops[want - 1];
     li = find_label(lab);
-    if (li < 0) { err(line, "undefined label '%s'", lab); return; }
+    if (li < 0) { ReportError(line, "undefined label '%s'", lab); return; }
     off = (long)labels[li].addr - (long)(addr + 1); /* the jump sits at addr+1 */
     if (off < lo || off > hi) {
-        err(line, "label '%s' is %ld words away; %s reaches %ld..%ld%s", lab, off, p->mnem, lo, hi,
+        ReportError(line, "label '%s' is %ld words away; %s reaches %ld..%ld%s", lab, off, p->mnem, lo, hi,
             lng ? "" : " (LJMP/LJZ reach further but overwrite r7)");
         return;
     }
@@ -331,31 +331,31 @@ static void do_jump_pseudo(const Parsed *p, unsigned addr, int line, const char 
 static void do_statement(const Parsed *p, unsigned addr, int line, const char *src)
 {
     static char r0s[] = "r0"; uint16_t w; char *t[3];
-    if (ieq(p->mnem, ".word")) {
+    if (EqualsIgnoreCase(p->mnem, ".word")) {
         long v;
-        if (p->nops != 1) { err(line, ".word takes one value"); return; }
+        if (p->nops != 1) { ReportError(line, ".word takes one value"); return; }
         if (parse_num(p->ops[0], &v)) {
-            if (v < -32768 || v > 65535) { err(line, ".word value out of 16-bit range"); return; }
+            if (v < -32768 || v > 65535) { ReportError(line, ".word value out of 16-bit range"); return; }
         } else {
             int li = find_label(p->ops[0]);
-            if (li < 0) { err(line, "'%s' is neither a number nor a defined label", p->ops[0]); return; }
+            if (li < 0) { ReportError(line, "'%s' is neither a number nor a defined label", p->ops[0]); return; }
             v = labels[li].addr;
         }
         emit(addr, (uint16_t)(v & 0xFFFF), line, src);
     } else if (p->mnem[0] == '.') {
-        err(line, "unknown directive '%s'", p->mnem);
+        ReportError(line, "unknown directive '%s'", p->mnem);
     } else if (is_pseudo2(p->mnem)) {
         do_jump_pseudo(p, addr, line, src);
-    } else if (ieq(p->mnem, "NOP")) {
-        if (p->nops != 0) { err(line, "NOP takes no operands"); return; }
+    } else if (EqualsIgnoreCase(p->mnem, "NOP")) {
+        if (p->nops != 0) { ReportError(line, "NOP takes no operands"); return; }
         t[0] = t[1] = t[2] = r0s;
         if (encode_instr(line, "ADD", t, 3, &w)) emit(addr, w, line, src);
-    } else if (ieq(p->mnem, "MOV")) {
-        if (p->nops != 2) { err(line, "MOV takes rd, ra"); return; }
+    } else if (EqualsIgnoreCase(p->mnem, "MOV")) {
+        if (p->nops != 2) { ReportError(line, "MOV takes rd, ra"); return; }
         t[0] = p->ops[0]; t[1] = p->ops[1]; t[2] = r0s;
         if (encode_instr(line, "ADD", t, 3, &w)) emit(addr, w, line, src);
-    } else if (ieq(p->mnem, "CLR")) {
-        if (p->nops != 1) { err(line, "CLR takes rd"); return; }
+    } else if (EqualsIgnoreCase(p->mnem, "CLR")) {
+        if (p->nops != 1) { ReportError(line, "CLR takes rd"); return; }
         t[0] = p->ops[0]; t[1] = t[2] = r0s;
         if (encode_instr(line, "ADD", t, 3, &w)) emit(addr, w, line, src);
     } else if (encode_instr(line, p->mnem, p->ops, p->nops, &w)) {
@@ -371,14 +371,14 @@ static void run_passes(char **lines, int nlines)
         strcpy(tmp, lines[i]); parse_line(tmp, i + 1, &p, true);
         if (!p.ok) continue;
         if (p.has_label) define_label(p.label, addr, i + 1);
-        if (p.has_mnem && ieq(p.mnem, ".org")) step_org(&p, &addr, i + 1, true);
+        if (p.has_mnem && EqualsIgnoreCase(p.mnem, ".org")) step_org(&p, &addr, i + 1, true);
         addr += (unsigned)stmt_size(&p);
     }
     addr = 0;
     for (i = 0; i < nlines; i++) { /* pass 2: encode */
         strcpy(tmp, lines[i]); parse_line(tmp, i + 1, &p, false);
         if (!p.ok || !p.has_mnem) continue;
-        if (ieq(p.mnem, ".org")) { step_org(&p, &addr, i + 1, false); continue; }
+        if (EqualsIgnoreCase(p.mnem, ".org")) { step_org(&p, &addr, i + 1, false); continue; }
         do_statement(&p, addr, i + 1, lines[i]);
         addr += (unsigned)stmt_size(&p);
     }
@@ -435,13 +435,13 @@ int main(int argc, char **argv)
         else in = argv[a];
     }
     if (!in || (strcmp(fmt, "bin") && strcmp(fmt, "v3"))) { usage(); return 2; }
-    src_name = in;
+    sourceName = in;
     if (!load_isa(isa_path)) return 1;
     if (!(f = fopen(in, "r"))) { fprintf(stderr, "cannot open '%s'\n", in); return 1; }
     while (fgets(buf, sizeof buf, f)) {
         size_t n = strlen(buf);
         if (n == sizeof buf - 1 && buf[n - 1] != '\n') {
-            int ch; err(nlines + 1, "line longer than %d characters", LINE_LEN - 2);
+            int ch; ReportError(nlines + 1, "line longer than %d characters", LINE_LEN - 2);
             while ((ch = fgetc(f)) != EOF && ch != '\n') { }
             buf[0] = '\0';
         }
@@ -453,7 +453,7 @@ int main(int argc, char **argv)
     if (lst && !(listing = fopen(lst, "w"))) { fprintf(stderr, "cannot write '%s'\n", lst); return 1; }
     run_passes(lines, nlines);
     if (listing) fclose(listing);
-    if (n_errors) { fprintf(stderr, "%d error(s); no output written\n", n_errors); return 1; }
+    if (errorCount) { fprintf(stderr, "%d error(s); no output written\n", errorCount); return 1; }
     if (!out) {
         char *dot; snprintf(outbuf, sizeof outbuf, "%s", in);
         dot = strrchr(outbuf, '.'); if (dot && !strchr(dot, '/') && !strchr(dot, '\\')) *dot = '\0';
