@@ -25,6 +25,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "util.h"
+
 #define MEM_WORDS  65536
 #define MAX_ISA    64
 #define MAX_LABELS 4096
@@ -59,42 +61,7 @@ static IsaEntry isa[MAX_ISA];   static int n_isa;
 static Label    labels[MAX_LABELS]; static int n_labels;
 static uint16_t mem[MEM_WORDS]; static bool used[MEM_WORDS];
 static int      max_addr = -1;
-static int      errorCount;
-static const char *sourceName = "";
 static FILE    *listing;
-
-/* ---------- small helpers ---------- */
-static void ReportError(int lineNumber, const char *format, ...)
-{
-    va_list arguments;
-    fprintf(stderr, "%s:%d: error: ", sourceName, lineNumber);
-    va_start(arguments, format); vfprintf(stderr, format, arguments); va_end(arguments);
-    fputc('\n', stderr);
-    errorCount++;
-}
-
-static char *TrimWhitespace(char *text)
-{
-    char *end;
-    while (isspace((unsigned char)*text)) text++;
-    end = text + strlen(text);
-    while (end > text && isspace((unsigned char)end[-1])) *--end = '\0';
-    return text;
-}
-
-static bool EqualsIgnoreCase(const char *first, const char *second)
-{
-    for (; *first && *second; first++, second++)
-        if (toupper((unsigned char)*first) != toupper((unsigned char)*second)) return false;
-    return *first == *second;
-}
-
-static bool IsIdentifier(const char *text)
-{
-    if (!(isalpha((unsigned char)*text) || *text == '_')) return false;
-    for (; *text; text++) if (!(isalnum((unsigned char)*text) || *text == '_')) return false;
-    return true;
-}
 
 static bool parse_reg(const char *s, int *r)
 {
@@ -412,8 +379,6 @@ static bool write_v3(const char *path)
 }
 
 /* ---------- main ---------- */
-static char *dupstr(const char *s) { size_t n = strlen(s) + 1; char *d = malloc(n); if (d) memcpy(d, s, n); return d; }
-
 static void usage(void)
 {
     fputs("usage: sweet16asm [-i isa.csv] [-o out] [-f v3|bin] [-l listing] input.asm\n"

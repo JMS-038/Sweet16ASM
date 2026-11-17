@@ -8,9 +8,12 @@ else
 endif
 CFLAGS ?= -std=c99 -Wall -Wextra -pedantic -O2
 TARGET  = sweet16asm$(EXE)
+SRCS    = src/main.c src/util.c
+HDRS    = $(wildcard src/*.h)
 
-$(TARGET): src/main.c
-	$(CC) $(CFLAGS) -o $@ $<
+# One compile-and-link step: CC and CFLAGS given on the command line still apply to every file.
+$(TARGET): $(SRCS) $(HDRS)
+	$(CC) $(CFLAGS) -o $@ $(SRCS)
 
 test: $(TARGET)
 	sh ./test.sh
