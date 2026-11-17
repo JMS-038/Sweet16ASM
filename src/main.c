@@ -27,6 +27,7 @@
 
 #include "constants.h"
 #include "lexer.h"
+#include "symbols.h"
 #include "util.h"
 
 typedef struct {
@@ -37,10 +38,7 @@ typedef struct {
     bool     whole;  /* LDW-style: no type/opcode fields, the 16-bit word is k itself */
 } IsaEntry;
 
-typedef struct { char name[NAME_LEN]; unsigned addr; int line; } Label;
-
 static IsaEntry isa[MAX_ISA];   static int n_isa;
-static Label    labels[MAX_LABELS]; static int n_labels;
 static uint16_t mem[MEM_WORDS]; static bool used[MEM_WORDS];
 static int      max_addr = -1;
 static FILE    *listing;
@@ -97,23 +95,6 @@ static bool load_isa(const char *path)
     }
     fclose(f);
     return ok;
-}
-
-/* ---------- labels ---------- */
-static int find_label(const char *name)
-{
-    int i;
-    for (i = 0; i < n_labels; i++) if (strcmp(labels[i].name, name) == 0) return i;
-    return -1;
-}
-
-static void define_label(const char *name, unsigned addr, int line)
-{
-    int i = find_label(name);
-    if (i >= 0) { ReportError(line, "label '%s' already defined on line %d", name, labels[i].line); return; }
-    if (n_labels == MAX_LABELS) { ReportError(line, "too many labels"); return; }
-    strcpy(labels[n_labels].name, name); labels[n_labels].addr = addr; labels[n_labels].line = line;
-    n_labels++;
 }
 
 /* ---------- statement sizing / .org ---------- */
