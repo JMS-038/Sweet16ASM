@@ -8,7 +8,7 @@ else
 endif
 CFLAGS ?= -std=c99 -Wall -Wextra -pedantic -O2
 TARGET  = sweet16asm$(EXE)
-SRCS    = src/main.c src/util.c src/lexer.c src/symbols.c
+SRCS    = src/main.c src/util.c src/lexer.c src/symbols.c src/isa.c
 HDRS    = $(wildcard src/*.h)
 
 # One compile-and-link step: CC and CFLAGS given on the command line still apply to every file.
