@@ -46,4 +46,4 @@ bool IsIdentifier(const char *text)
     return true;
 }
 
-char *dupstr(const char *s) { size_t n = strlen(s) + 1; char *d = malloc(n); if (d) memcpy(d, s, n); return d; }
+char *DuplicateString(const char *text) { size_t size = strlen(text) + 1; char *copy = malloc(size); if (copy) memcpy(copy, text, size); return copy; }

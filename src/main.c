@@ -62,7 +62,7 @@ int main(int argc, char **argv)
         }
         buf[strcspn(buf, "\r\n")] = '\0';
         if (nlines == cap) { cap = cap ? cap * 2 : 128; lines = realloc(lines, (size_t)cap * sizeof *lines); if (!lines) return 1; }
-        lines[nlines++] = dupstr(buf);
+        lines[nlines++] = DuplicateString(buf);
     }
     fclose(f);
     if (lst && !(state.listing = fopen(lst, "w"))) { fprintf(stderr, "cannot write '%s'\n", lst); return 1; }

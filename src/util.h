@@ -25,6 +25,6 @@ bool EqualsIgnoreCase(const char *first, const char *second);
 bool IsIdentifier(const char *text);
 
 /* Returns a heap copy of s, or NULL when allocation fails. The caller frees it. */
-char *dupstr(const char *s);
+char *DuplicateString(const char *text);
 
 #endif /* UTIL_H */
