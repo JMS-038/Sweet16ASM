@@ -28,11 +28,10 @@
 #include "constants.h"
 #include "isa.h"
 #include "lexer.h"
+#include "output.h"
 #include "symbols.h"
 #include "util.h"
 
-static uint16_t mem[MEM_WORDS]; static bool used[MEM_WORDS];
-static int      max_addr = -1;
 static FILE    *listing;
 
 /* ---------- statement sizing / .org ---------- */
@@ -98,9 +97,9 @@ static bool encode_instr(int line, const char *mn, char *const *ops, int nops, u
 static void emit(unsigned addr, uint16_t w, int line, const char *src)
 {
     if (addr >= MEM_WORDS) { ReportError(line, "program exceeds 64K words"); return; }
-    if (used[addr]) { ReportError(line, "address 0x%04X already written", addr); return; }
-    mem[addr] = w; used[addr] = true;
-    if ((int)addr > max_addr) max_addr = (int)addr;
+    if (image.used[addr]) { ReportError(line, "address 0x%04X already written", addr); return; }
+    image.mem[addr] = w; image.used[addr] = true;
+    if ((int)addr > image.max_addr) image.max_addr = (int)addr;
     if (listing) fprintf(listing, "%04X: %04X  %s\n", addr, w, src ? src : "");
 }
 
@@ -196,33 +195,6 @@ static void run_passes(char **lines, int nlines)
     }
 }
 
-/* ---------- output ---------- */
-/* bin: 65536 big-endian 16-bit words (131072 bytes). Matches the earlier program2_romJMS image byte for byte. */
-static bool write_bin(const char *path)
-{
-    FILE *f = fopen(path, "wb"); int i;
-    if (!f) return false;
-    for (i = 0; i < MEM_WORDS; i++) { fputc(mem[i] >> 8, f); fputc(mem[i] & 0xFF, f); }
-    return fclose(f) == 0;
-}
-
-/* v3: Logisim "v3.0 hex words addressed" text, as saved by the Sweet16 ROMs (microcode_rom.bin,
- * program_rom_matrix_marshall.bin): header line, then "AAAA: w w w w w w w w" with 4-digit lowercase
- * hex, 8 words per line, contiguous from address 0 up to the last word written. Address width is 4
- * digits for the 64K program ROM (the 256-word microcode ROM uses 2). */
-static bool write_v3(const char *path)
-{
-    FILE *f = fopen(path, "wb"); int i; /* "wb": keep plain '\n' line endings on Windows too */
-    if (!f) return false;
-    fputs("v3.0 hex words addressed\n", f);
-    for (i = 0; i <= max_addr; i++) {
-        if (i % 8 == 0) fprintf(f, "%04x:", i);
-        fprintf(f, " %04x", mem[i]);
-        if (i % 8 == 7 || i == max_addr) fputc('\n', f);
-    }
-    return fclose(f) == 0;
-}
-
 /* ---------- main ---------- */
 static void usage(void)
 {
@@ -272,6 +244,6 @@ int main(int argc, char **argv)
     }
     ok = strcmp(fmt, "bin") ? write_v3(out) : write_bin(out);
     if (!ok) { fprintf(stderr, "cannot write '%s'\n", out); return 1; }
-    printf("%s: %d word(s) -> %s (%s)\n", in, max_addr + 1, out, fmt);
+    printf("%s: %d word(s) -> %s (%s)\n", in, image.max_addr + 1, out, fmt);
     return 0;
 }
