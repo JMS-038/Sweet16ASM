@@ -9,24 +9,24 @@
 
 #include "constants.h"
 
-/* The result of parsing one source line. The ops pointers point into the line buffer. */
+/* The result of parsing one source line. The operands pointers point into the line buffer. */
 typedef struct {
-    bool  ok, has_label, has_mnem;
+    bool  isValid, hasLabel, hasMnemonic;
     char  label[NAME_LEN];
-    char  mnem[NAME_LEN];
-    char *ops[MAX_OPS];
-    int   nops;
-} Parsed;
+    char  mnemonic[NAME_LEN];
+    char *operands[MAX_OPS];
+    int   operandCount;
+} ParsedLine;
 
 /* Parses "rN" (N = 0..7, either case) into *r. Returns false for anything else. */
-bool parse_reg(const char *s, int *r);
+bool ParseRegister(const char *text, int *registerNumber);
 
 /* Parses a decimal, 0x hex or 0b binary number with an optional sign into *out.
  * Returns false when s is not a number or does not fit in a long. */
-bool parse_num(const char *s, long *out);
+bool ParseNumber(const char *text, long *valueOut);
 
-/* Splits buf (modified in place) into p->label, p->mnem and p->ops.
- * p->ok is false when the line is malformed; the error is reported only when report is true. */
-void parse_line(char *buf, int line, Parsed *p, bool report);
+/* Splits buffer (modified in place) into parsed->label, parsed->mnemonic and parsed->operands.
+ * parsed->isValid is false when the line is malformed; the error is reported only when reportErrors is true. */
+void ParseLine(char *buffer, int lineNumber, ParsedLine *parsed, bool reportErrors);
 
 #endif /* LEXER_H */
