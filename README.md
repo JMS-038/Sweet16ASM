@@ -230,5 +230,19 @@ examples/        program2.asm (explicit offsets), jumps.asm (labels and pseudo-o
 tests/           fixtures: PDF examples, vectors, and the matrix_marshall ROM round trip
 ```
 
+## Code conventions
+
+Names follow one style so the code reads the same in every file:
+
+| Kind | Style | Examples |
+|---|---|---|
+| Variables, parameters, struct fields | camelCase | `lineNumber`, `isaTable`, `operandCount` |
+| Functions, structs and typedefs | PascalCase | `ParseLine`, `LoadISATable`, `ParsedLine` |
+| `#define` constants and enum values | UPPER_SNAKE_CASE | `MEM_WORDS`, `IMM_MAX` |
+| File names | lowercase | `lexer.c`, `isa.csv` |
+
+Acronyms such as ISA, ASM and ROM stay capitalised inside a name (`LoadISATable`, `usesLDW`).
+As the first word of a camelCase name they are lowercase (`isaTable`).
+
 Build requirements: any C99 compiler (`cc`). Nothing else. To add a module, put `name.c` and `name.h` in
 `src/`; the Makefile compiles every `.c` file there.
