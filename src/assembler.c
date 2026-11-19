@@ -114,6 +114,14 @@ static void AssembleJumpPseudo(const AssemblerState *state, const ParsedLine *pa
             usesLDW ? "" : " (LJMP/LJZ reach further but overwrite r7)");
         return;
     }
+    if (isConditional) { /* the offset is loaded into the scratch register first, so it must not be the register being tested */
+        int conditionNumber;
+        if (ParseRegister(parsed->operands[0], &conditionNumber) && conditionNumber == (usesLDW ? 7 : scratchNumber)) {
+            if (usesLDW) ReportError(lineNumber, "r7 cannot be the condition register of LJZ; LDW overwrites it with the jump offset before it is tested");
+            else         ReportError(lineNumber, "scratch register r%d is also the condition register; the jump offset overwrites it before it is tested", conditionNumber);
+            return;
+        }
+    }
     snprintf(offsetText, sizeof offsetText, "%ld", offset);
     if (usesLDW) { loadOperands[0] = offsetText; if (!EncodeInstruction(lineNumber, "LDW", loadOperands, 1, &loadWord)) return; }
     else     { loadOperands[0] = scratchRegister; loadOperands[1] = offsetText; if (!EncodeInstruction(lineNumber, "LDI", loadOperands, 2, &loadWord)) return; }

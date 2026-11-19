@@ -54,6 +54,8 @@ expect_err "LDW too small"     'LDW -16385\n'          'out of range'
 expect_err "LDW label too far" '.org 20000\ny: NOP\nLDW y\n' 'does not fit'
 expect_err "JMP hints LJMP"    'a: NOP\n.org 100\nJMP r1, a\n' 'LJMP'
 expect_err "LJMP out of range" 'LJMP a\n.org 20000\na: NOP\n' 'words away'
+expect_err "JZL scratch is condition" 'a: NOP\nJZL r4, r4, a\n' 'also the condition register'
+expect_err "LJZ r7 is condition"      'a: NOP\nLJZ r7, a\n'     'cannot be the condition register'
 expect_err "org backwards"     'NOP\nNOP\n.org 1\n'      'backwards'
 
 # 7. Syntax: comments, CRLF, label on its own line, no-space comma form, case-insensitivity
@@ -75,6 +77,12 @@ $ASM -l $T/lj.lst -o $T/lj.hex $T/lj.asm >/dev/null && [ "$(sed -n 2p $T/lj.lst 
 printf 'a: NOP\nLJZ r2, a\n' > $T/lz.asm        # LDW at 1, JZ at 2: off = 0-2 = -2 = 0xFFFE
 $ASM -l $T/lz.lst -o $T/lz.hex $T/lz.asm >/dev/null && [ "$(sed -n 2p $T/lz.lst | cut -c1-10)" = "0001: FFFE" ] && [ "$(sed -n 3p $T/lz.lst | cut -c1-10)" = "0002: 5417" ] \
   && ok "LJZ (LDW off ; JZ ra,r7)" || bad "LJZ"
+printf 'a: NOP\nJZL r4, r5, a\n' > $T/zl.asm        # different scratch register: LDI r5,-2 ; JZ r4,r5
+$ASM -l $T/zl.lst -o $T/zl.hex $T/zl.asm >/dev/null && [ "$(sed -n 2p $T/zl.lst | cut -c1-10)" = "0001: 537E" ] && [ "$(sed -n 3p $T/zl.lst | cut -c1-10)" = "0002: 5425" ] \
+  && ok "JZL (LDI rt,off ; JZ ra,rt)" || bad "JZL"
+printf 'a: NOP\nJZL r0, r5, a\nLJZ r0, a\n' > $T/z0.asm   # r0 as the condition register is not a clash
+$ASM -l $T/z0.lst -o $T/z0.hex $T/z0.asm >/dev/null && [ "$(sed -n 3p $T/z0.lst | cut -c1-10)" = "0002: 5405" ] && [ "$(sed -n 5p $T/z0.lst | cut -c1-10)" = "0004: 5407" ] \
+  && ok "JZL/LJZ with r0 as the condition" || bad "JZL/LJZ r0 condition"
 
 # 10. ISA table rule: opcode '-' (whole-word) must use operand code 'k'
 printf 'mnemonic,opcode,operands\nFOO,-,dab\n' > $T/bad.csv; printf 'NOP\n' > $T/n.asm
