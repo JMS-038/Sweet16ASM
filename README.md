@@ -23,7 +23,8 @@ make test                              # runs the regression tests
 `make` and `make test` exactly as above. To use `make` from PowerShell, add `C:\msys64\ucrt64\bin` and
 `C:\msys64\usr\bin` to your Path (in that order). The Makefile picks `gcc` and the `.exe` name
 automatically on Windows. Without `make`, one command also works:
-`gcc -std=c99 -Wall -Wextra -pedantic -O2 -o sweet16asm.exe sweet16asm.c`, then
+`gcc -std=c99 -Wall -Wextra -pedantic -O2 -o sweet16asm.exe src/main.c src/util.c src/lexer.c src/symbols.c src/isa.c src/output.c src/assembler.c`
+(every `.c` file in `src/`), then
 `.\sweet16asm.exe examples\program2.asm` from the repository folder (the ISA table `isa.csv` is read from
 the current directory unless you pass `-i`). `make test` needs a Unix-style shell, which the MSYS2 terminal provides.
 
@@ -162,14 +163,17 @@ instruction is a one-line edit with no recompile. Lines starting with `#` are co
 
 ## How it works
 
-Two passes over the source, in `sweet16asm.c`:
+The program is a handful of small modules under `src/` (see Repository layout below).
+`main.c` reads the command line and the source file, loads the ISA table, and hands the
+source lines to `assembler.c`, which makes two passes over them. When both passes finish
+without errors, `main.c` saves the image with `output.c`.
 
-1. **Pass 1** tokenizes each line (strip the comment, split off an optional label,
-   split operands on commas), assigns an address to every statement, and records
-   labels. Pseudo-ops that expand to two words are sized here, so forward
+1. **Pass 1** tokenizes each line (`lexer.c`: strip the comment, split off an optional
+   label, split operands on commas), assigns an address to every statement, and records
+   labels (`symbols.c`). Pseudo-ops that expand to two words are sized here, so forward
    references resolve correctly.
-2. **Pass 2** encodes each statement using the ISA table and writes words into a
-   64K-word image. It checks register names, immediate ranges, operand counts,
+2. **Pass 2** encodes each statement using the ISA table (`isa.c`) and writes words into a
+   64K-word image (`output.c`). It checks register names, immediate ranges, operand counts,
    undefined and duplicate labels, and overlapping addresses.
 
 ## Verification
@@ -210,13 +214,35 @@ Two passes over the source, in `sweet16asm.c`:
 ## Repository layout
 
 ```
-sweet16asm.c   the assembler (single file, C99)
-isa.csv        instruction table loaded at startup
-Makefile       make / make test / make clean
-test.sh        regression tests
-examples/      program2.asm (explicit offsets), jumps.asm (labels and pseudo-ops),
-               smoke_test.asm (short program to confirm an assembled image runs in Logisim)
-tests/         fixtures: PDF examples, vectors, and the matrix_marshall ROM round trip
+src/main.c       command line: reads the source file, runs the passes, writes the output
+src/assembler.c  the two passes: addresses and labels, then encoding
+src/lexer.c      splits a source line into label, mnemonic and operands; parses registers and numbers
+src/symbols.c    the label table
+src/isa.c        loads isa.csv and looks up instructions
+src/output.c     the assembled image and the writers (Logisim hex, raw binary)
+src/util.c       error reporting and string helpers
+src/*.h          one header per module, plus constants.h (shared size limits)
+isa.csv          instruction table loaded at startup
+Makefile         make / make test / make clean
+test.sh          regression tests
+examples/        program2.asm (explicit offsets), jumps.asm (labels and pseudo-ops),
+                 smoke_test.asm (short program to confirm an assembled image runs in Logisim)
+tests/           fixtures: PDF examples, vectors, and the matrix_marshall ROM round trip
 ```
 
-Build requirements: any C99 compiler (`cc`). Nothing else.
+## Code conventions
+
+Names follow one style so the code reads the same in every file:
+
+| Kind | Style | Examples |
+|---|---|---|
+| Variables, parameters, struct fields | camelCase | `lineNumber`, `isaTable`, `operandCount` |
+| Functions, structs and typedefs | PascalCase | `ParseLine`, `LoadISATable`, `ParsedLine` |
+| `#define` constants and enum values | UPPER_SNAKE_CASE | `MEM_WORDS`, `IMM_MAX` |
+| File names | lowercase | `lexer.c`, `isa.csv` |
+
+Acronyms such as ISA, ASM and ROM stay capitalised inside a name (`LoadISATable`, `usesLDW`).
+As the first word of a camelCase name they are lowercase (`isaTable`).
+
+Build requirements: any C99 compiler (`cc`). Nothing else. To add a module, put `name.c` and `name.h` in
+`src/`; the Makefile compiles every `.c` file there.
