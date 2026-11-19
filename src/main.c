@@ -28,7 +28,7 @@
 #include "util.h"
 
 /* ---------- main ---------- */
-static void usage(void)
+static void PrintUsage(void)
 {
     fputs("usage: sweet16asm [-i isa.csv] [-o out] [-f v3|bin] [-l listing] input.asm\n"
           "  -i  ISA table (default ./isa.csv)\n"
@@ -38,45 +38,45 @@ static void usage(void)
 
 int main(int argc, char **argv)
 {
-    const char *isa_path = "isa.csv", *out = NULL, *fmt = "v3", *lst = NULL, *in = NULL;
-    char **lines = NULL, buf[LINE_LEN], outbuf[512]; int nlines = 0, cap = 0, a; FILE *f; bool ok;
+    const char *isaPath = "isa.csv", *outputPath = NULL, *format = "v3", *listingPath = NULL, *inputPath = NULL;
+    char **lines = NULL, lineBuffer[LINE_LEN], defaultOutputPath[512]; int lineCount = 0, capacity = 0, argIndex; FILE *sourceFile; bool wroteOutput;
     AssemblerState state = { NULL };
-    for (a = 1; a < argc; a++) {
-        if (!strcmp(argv[a], "-i") && a + 1 < argc) isa_path = argv[++a];
-        else if (!strcmp(argv[a], "-o") && a + 1 < argc) out = argv[++a];
-        else if (!strcmp(argv[a], "-f") && a + 1 < argc) fmt = argv[++a];
-        else if (!strcmp(argv[a], "-l") && a + 1 < argc) lst = argv[++a];
-        else if (argv[a][0] == '-' || in) { usage(); return 2; }
-        else in = argv[a];
+    for (argIndex = 1; argIndex < argc; argIndex++) {
+        if (!strcmp(argv[argIndex], "-i") && argIndex + 1 < argc) isaPath = argv[++argIndex];
+        else if (!strcmp(argv[argIndex], "-o") && argIndex + 1 < argc) outputPath = argv[++argIndex];
+        else if (!strcmp(argv[argIndex], "-f") && argIndex + 1 < argc) format = argv[++argIndex];
+        else if (!strcmp(argv[argIndex], "-l") && argIndex + 1 < argc) listingPath = argv[++argIndex];
+        else if (argv[argIndex][0] == '-' || inputPath) { PrintUsage(); return 2; }
+        else inputPath = argv[argIndex];
     }
-    if (!in || (strcmp(fmt, "bin") && strcmp(fmt, "v3"))) { usage(); return 2; }
-    sourceName = in;
-    if (!LoadISATable(isa_path)) return 1;
-    if (!(f = fopen(in, "r"))) { fprintf(stderr, "cannot open '%s'\n", in); return 1; }
-    while (fgets(buf, sizeof buf, f)) {
-        size_t n = strlen(buf);
-        if (n == sizeof buf - 1 && buf[n - 1] != '\n') {
-            int ch; ReportError(nlines + 1, "line longer than %d characters", LINE_LEN - 2);
-            while ((ch = fgetc(f)) != EOF && ch != '\n') { }
-            buf[0] = '\0';
+    if (!inputPath || (strcmp(format, "bin") && strcmp(format, "v3"))) { PrintUsage(); return 2; }
+    sourceName = inputPath;
+    if (!LoadISATable(isaPath)) return 1;
+    if (!(sourceFile = fopen(inputPath, "r"))) { fprintf(stderr, "cannot open '%s'\n", inputPath); return 1; }
+    while (fgets(lineBuffer, sizeof lineBuffer, sourceFile)) {
+        size_t length = strlen(lineBuffer);
+        if (length == sizeof lineBuffer - 1 && lineBuffer[length - 1] != '\n') {
+            int character; ReportError(lineCount + 1, "line longer than %d characters", LINE_LEN - 2);
+            while ((character = fgetc(sourceFile)) != EOF && character != '\n') { }
+            lineBuffer[0] = '\0';
         }
-        buf[strcspn(buf, "\r\n")] = '\0';
-        if (nlines == cap) { cap = cap ? cap * 2 : 128; lines = realloc(lines, (size_t)cap * sizeof *lines); if (!lines) return 1; }
-        lines[nlines++] = DuplicateString(buf);
+        lineBuffer[strcspn(lineBuffer, "\r\n")] = '\0';
+        if (lineCount == capacity) { capacity = capacity ? capacity * 2 : 128; lines = realloc(lines, (size_t)capacity * sizeof *lines); if (!lines) return 1; }
+        lines[lineCount++] = DuplicateString(lineBuffer);
     }
-    fclose(f);
-    if (lst && !(state.listingFile = fopen(lst, "w"))) { fprintf(stderr, "cannot write '%s'\n", lst); return 1; }
-    RunPasses(lines, nlines, &state);
+    fclose(sourceFile);
+    if (listingPath && !(state.listingFile = fopen(listingPath, "w"))) { fprintf(stderr, "cannot write '%s'\n", listingPath); return 1; }
+    RunPasses(lines, lineCount, &state);
     if (state.listingFile) fclose(state.listingFile);
     if (errorCount) { fprintf(stderr, "%d error(s); no output written\n", errorCount); return 1; }
-    if (!out) {
-        char *dot; snprintf(outbuf, sizeof outbuf, "%s", in);
-        dot = strrchr(outbuf, '.'); if (dot && !strchr(dot, '/') && !strchr(dot, '\\')) *dot = '\0';
-        strncat(outbuf, strcmp(fmt, "bin") ? ".hex" : ".bin", sizeof outbuf - strlen(outbuf) - 1);
-        out = outbuf;
+    if (!outputPath) {
+        char *lastDot; snprintf(defaultOutputPath, sizeof defaultOutputPath, "%s", inputPath);
+        lastDot = strrchr(defaultOutputPath, '.'); if (lastDot && !strchr(lastDot, '/') && !strchr(lastDot, '\\')) *lastDot = '\0';
+        strncat(defaultOutputPath, strcmp(format, "bin") ? ".hex" : ".bin", sizeof defaultOutputPath - strlen(defaultOutputPath) - 1);
+        outputPath = defaultOutputPath;
     }
-    ok = strcmp(fmt, "bin") ? WriteV3Image(out) : WriteBinImage(out);
-    if (!ok) { fprintf(stderr, "cannot write '%s'\n", out); return 1; }
-    printf("%s: %d word(s) -> %s (%s)\n", in, image.highestAddress + 1, out, fmt);
+    wroteOutput = strcmp(format, "bin") ? WriteV3Image(outputPath) : WriteBinImage(outputPath);
+    if (!wroteOutput) { fprintf(stderr, "cannot write '%s'\n", outputPath); return 1; }
+    printf("%s: %d word(s) -> %s (%s)\n", inputPath, image.highestAddress + 1, outputPath, format);
     return 0;
 }
