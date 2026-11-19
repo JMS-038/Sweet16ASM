@@ -6,16 +6,16 @@
 
 #include "constants.h"
 
-typedef struct { char name[NAME_LEN]; unsigned addr; int line; } Label;
+typedef struct { char name[NAME_LEN]; unsigned address; int lineNumber; } Label;
 
-/* The label table. Entries 0..n-1 are defined, in order of definition; use find_label to look one up. */
-extern Label labels[MAX_LABELS];
+/* The label table. Entries 0..n-1 are defined, in order of definition; use FindLabel to look one up. */
+extern Label labelTable[MAX_LABELS];
 
-/* Returns the index of the label called name in labels, or -1 when it is not defined. */
-int find_label(const char *name);
+/* Returns the index of the label called name in labelTable, or -1 when it is not defined. */
+int FindLabel(const char *name);
 
-/* Adds a label at addr, defined on source line line. Reports an error (and adds nothing)
+/* Adds a label at address, defined on source line lineNumber. Reports an error (and adds nothing)
  * when the name is already defined or the table is full. */
-void define_label(const char *name, unsigned addr, int line);
+void DefineLabel(const char *name, unsigned address, int lineNumber);
 
 #endif /* SYMBOLS_H */

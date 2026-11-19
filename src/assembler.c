@@ -51,9 +51,9 @@ static bool encode_instr(int line, const char *mn, char *const *ops, int nops, u
     if (e->whole) { /* LDW k: the instruction word is k itself (00.. for k>=0, 11.. for k<0) */
         long v;
         if (!ParseNumber(ops[0], &v)) {
-            int li = find_label(ops[0]);
+            int li = FindLabel(ops[0]);
             if (li < 0) { ReportError(line, "'%s' is neither a number nor a defined label", ops[0]); return false; }
-            v = (long)labels[li].addr;
+            v = (long)labelTable[li].address;
             if (v > K_MAX) { ReportError(line, "label '%s' (address 0x%04lX) does not fit %s (max %d)", ops[0], v, e->mnem, K_MAX); return false; }
         }
         if (v < K_MIN || v > K_MAX) { ReportError(line, "%s value %ld out of range (%d..%d)", e->mnem, v, K_MIN, K_MAX); return false; }
@@ -106,9 +106,9 @@ static void do_jump_pseudo(const AssemblerState *state, const ParsedLine *p, uns
         if (!ParseRegister(rts, &rt) || rt == 0) { ReportError(line, "scratch register '%s' must be r1-r7", rts); return; }
     }
     lab = p->operands[want - 1];
-    li = find_label(lab);
+    li = FindLabel(lab);
     if (li < 0) { ReportError(line, "undefined label '%s'", lab); return; }
-    off = (long)labels[li].addr - (long)(addr + 1); /* the jump sits at addr+1 */
+    off = (long)labelTable[li].address - (long)(addr + 1); /* the jump sits at addr+1 */
     if (off < lo || off > hi) {
         ReportError(line, "label '%s' is %ld words away; %s reaches %ld..%ld%s", lab, off, p->mnemonic, lo, hi,
             lng ? "" : " (LJMP/LJZ reach further but overwrite r7)");
@@ -132,9 +132,9 @@ static void do_statement(const AssemblerState *state, const ParsedLine *p, unsig
         if (ParseNumber(p->operands[0], &v)) {
             if (v < -32768 || v > 65535) { ReportError(line, ".word value out of 16-bit range"); return; }
         } else {
-            int li = find_label(p->operands[0]);
+            int li = FindLabel(p->operands[0]);
             if (li < 0) { ReportError(line, "'%s' is neither a number nor a defined label", p->operands[0]); return; }
-            v = labels[li].addr;
+            v = labelTable[li].address;
         }
         emit(state, addr, (uint16_t)(v & 0xFFFF), line, src);
     } else if (p->mnemonic[0] == '.') {
@@ -165,7 +165,7 @@ void run_passes(char **lines, int nlines, const AssemblerState *state)
     for (i = 0; i < nlines; i++) { /* pass 1: addresses + labels */
         strcpy(tmp, lines[i]); ParseLine(tmp, i + 1, &p, true);
         if (!p.isValid) continue;
-        if (p.hasLabel) define_label(p.label, addr, i + 1);
+        if (p.hasLabel) DefineLabel(p.label, addr, i + 1);
         if (p.hasMnemonic && EqualsIgnoreCase(p.mnemonic, ".org")) step_org(&p, &addr, i + 1, true);
         addr += (unsigned)stmt_size(&p);
     }

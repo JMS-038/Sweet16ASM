@@ -9,21 +9,21 @@
 #include "symbols.h"
 #include "util.h"
 
-Label labels[MAX_LABELS];
-static int n_labels;
+Label labelTable[MAX_LABELS];
+static int labelCount;
 
-int find_label(const char *name)
+int FindLabel(const char *name)
 {
-    int i;
-    for (i = 0; i < n_labels; i++) if (strcmp(labels[i].name, name) == 0) return i;
+    int index;
+    for (index = 0; index < labelCount; index++) if (strcmp(labelTable[index].name, name) == 0) return index;
     return -1;
 }
 
-void define_label(const char *name, unsigned addr, int line)
+void DefineLabel(const char *name, unsigned address, int lineNumber)
 {
-    int i = find_label(name);
-    if (i >= 0) { ReportError(line, "label '%s' already defined on line %d", name, labels[i].line); return; }
-    if (n_labels == MAX_LABELS) { ReportError(line, "too many labels"); return; }
-    strcpy(labels[n_labels].name, name); labels[n_labels].addr = addr; labels[n_labels].line = line;
-    n_labels++;
+    int existingIndex = FindLabel(name);
+    if (existingIndex >= 0) { ReportError(lineNumber, "label '%s' already defined on line %d", name, labelTable[existingIndex].lineNumber); return; }
+    if (labelCount == MAX_LABELS) { ReportError(lineNumber, "too many labels"); return; }
+    strcpy(labelTable[labelCount].name, name); labelTable[labelCount].address = address; labelTable[labelCount].lineNumber = lineNumber;
+    labelCount++;
 }
