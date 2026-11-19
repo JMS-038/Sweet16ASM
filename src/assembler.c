@@ -81,9 +81,9 @@ static bool encode_instr(int line, const char *mn, char *const *ops, int nops, u
 static void emit(const AssemblerState *state, unsigned addr, uint16_t w, int line, const char *src)
 {
     if (addr >= MEM_WORDS) { ReportError(line, "program exceeds 64K words"); return; }
-    if (image.used[addr]) { ReportError(line, "address 0x%04X already written", addr); return; }
-    image.mem[addr] = w; image.used[addr] = true;
-    if ((int)addr > image.max_addr) image.max_addr = (int)addr;
+    if (image.isWritten[addr]) { ReportError(line, "address 0x%04X already written", addr); return; }
+    image.words[addr] = w; image.isWritten[addr] = true;
+    if ((int)addr > image.highestAddress) image.highestAddress = (int)addr;
     if (state->listing) fprintf(state->listing, "%04X: %04X  %s\n", addr, w, src ? src : "");
 }
 

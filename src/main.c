@@ -75,8 +75,8 @@ int main(int argc, char **argv)
         strncat(outbuf, strcmp(fmt, "bin") ? ".hex" : ".bin", sizeof outbuf - strlen(outbuf) - 1);
         out = outbuf;
     }
-    ok = strcmp(fmt, "bin") ? write_v3(out) : write_bin(out);
+    ok = strcmp(fmt, "bin") ? WriteV3Image(out) : WriteBinImage(out);
     if (!ok) { fprintf(stderr, "cannot write '%s'\n", out); return 1; }
-    printf("%s: %d word(s) -> %s (%s)\n", in, image.max_addr + 1, out, fmt);
+    printf("%s: %d word(s) -> %s (%s)\n", in, image.highestAddress + 1, out, fmt);
     return 0;
 }
