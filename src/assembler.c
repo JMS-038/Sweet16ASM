@@ -44,25 +44,25 @@ static void step_org(const ParsedLine *p, unsigned *addr, int line, bool report)
 /* ---------- encoding ---------- */
 static bool encode_instr(int line, const char *mn, char *const *ops, int nops, uint16_t *out)
 {
-    const IsaEntry *e = find_isa(mn);
+    const ISAEntry *e = FindISAEntry(mn);
     unsigned w; int k;
     if (!e) { ReportError(line, "unknown instruction '%s'", mn); return false; }
-    if (nops != e->nops) { ReportError(line, "%s takes %d operand(s), got %d", e->mnem, e->nops, nops); return false; }
-    if (e->whole) { /* LDW k: the instruction word is k itself (00.. for k>=0, 11.. for k<0) */
+    if (nops != e->operandCount) { ReportError(line, "%s takes %d operand(s), got %d", e->mnemonic, e->operandCount, nops); return false; }
+    if (e->isWholeWord) { /* LDW k: the instruction word is k itself (00.. for k>=0, 11.. for k<0) */
         long v;
         if (!ParseNumber(ops[0], &v)) {
             int li = FindLabel(ops[0]);
             if (li < 0) { ReportError(line, "'%s' is neither a number nor a defined label", ops[0]); return false; }
             v = (long)labelTable[li].address;
-            if (v > K_MAX) { ReportError(line, "label '%s' (address 0x%04lX) does not fit %s (max %d)", ops[0], v, e->mnem, K_MAX); return false; }
+            if (v > K_MAX) { ReportError(line, "label '%s' (address 0x%04lX) does not fit %s (max %d)", ops[0], v, e->mnemonic, K_MAX); return false; }
         }
-        if (v < K_MIN || v > K_MAX) { ReportError(line, "%s value %ld out of range (%d..%d)", e->mnem, v, K_MIN, K_MAX); return false; }
+        if (v < K_MIN || v > K_MAX) { ReportError(line, "%s value %ld out of range (%d..%d)", e->mnemonic, v, K_MIN, K_MAX); return false; }
         *out = (uint16_t)(v & 0xFFFF);
         return true;
     }
     w = PREFIX_BITS | (e->opcode << 9);
     for (k = 0; k < nops; k++) {
-        char f = e->ops[k];
+        char f = e->operandCodes[k];
         if (f == 'i') {
             long v;
             if (!ParseNumber(ops[k], &v)) { ReportError(line, "'%s' is not a number", ops[k]); return false; }

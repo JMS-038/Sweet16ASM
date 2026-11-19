@@ -51,7 +51,7 @@ int main(int argc, char **argv)
     }
     if (!in || (strcmp(fmt, "bin") && strcmp(fmt, "v3"))) { usage(); return 2; }
     sourceName = in;
-    if (!load_isa(isa_path)) return 1;
+    if (!LoadISATable(isa_path)) return 1;
     if (!(f = fopen(in, "r"))) { fprintf(stderr, "cannot open '%s'\n", in); return 1; }
     while (fgets(buf, sizeof buf, f)) {
         size_t n = strlen(buf);

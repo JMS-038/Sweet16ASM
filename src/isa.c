@@ -12,57 +12,57 @@
 #include "isa.h"
 #include "util.h"
 
-static IsaEntry isa[MAX_ISA];   static int n_isa;
+static ISAEntry isaTable[MAX_ISA];   static int isaEntryCount;
 
-const IsaEntry *find_isa(const char *m)
+const ISAEntry *FindISAEntry(const char *mnemonic)
 {
-    int i;
-    for (i = 0; i < n_isa; i++) if (EqualsIgnoreCase(isa[i].mnem, m)) return &isa[i];
+    int index;
+    for (index = 0; index < isaEntryCount; index++) if (EqualsIgnoreCase(isaTable[index].mnemonic, mnemonic)) return &isaTable[index];
     return NULL;
 }
 
-bool load_isa(const char *path)
+bool LoadISATable(const char *path)
 {
-    FILE *f = fopen(path, "r");
-    char buf[LINE_LEN]; int ln = 0; bool ok = true;
-    if (!f) { fprintf(stderr, "cannot open ISA table '%s' (use -i <file>)\n", path); return false; }
-    while (fgets(buf, sizeof buf, f)) {
-        char *s = TrimWhitespace(buf), *fld[3] = {NULL, NULL, NULL}, *p, *c, *m, *o, *d;
-        int nf = 0; size_t k; IsaEntry e;
-        ln++;
-        if (!*s || *s == '#') continue;
-        p = s;
-        while (nf < 3) {
-            fld[nf++] = p;
-            c = strchr(p, ',');
-            if (!c) break;
-            *c = '\0'; p = c + 1;
+    FILE *file = fopen(path, "r");
+    char rowBuffer[LINE_LEN]; int lineNumber = 0; bool allRowsValid = true;
+    if (!file) { fprintf(stderr, "cannot open ISA table '%s' (use -i <file>)\n", path); return false; }
+    while (fgets(rowBuffer, sizeof rowBuffer, file)) {
+        char *text = TrimWhitespace(rowBuffer), *fields[3] = {NULL, NULL, NULL}, *cursor, *comma, *mnemonic, *opcodeText, *operandText;
+        int fieldCount = 0; size_t codeIndex; ISAEntry entry;
+        lineNumber++;
+        if (!*text || *text == '#') continue;
+        cursor = text;
+        while (fieldCount < 3) {
+            fields[fieldCount++] = cursor;
+            comma = strchr(cursor, ',');
+            if (!comma) break;
+            *comma = '\0'; cursor = comma + 1;
         }
-        m = TrimWhitespace(fld[0]);
-        if (EqualsIgnoreCase(m, "mnemonic")) continue; /* header row */
-        if (nf < 2) { fprintf(stderr, "%s:%d: need mnemonic,opcode,operands\n", path, ln); ok = false; continue; }
-        o = TrimWhitespace(fld[1]); d = nf > 2 ? TrimWhitespace(fld[2]) : (char *)"";
-        memset(&e, 0, sizeof e);
-        if (!IsIdentifier(m) || strlen(m) >= sizeof e.mnem) { fprintf(stderr, "%s:%d: bad mnemonic '%s'\n", path, ln, m); ok = false; continue; }
-        strcpy(e.mnem, m);
-        if (strlen(d) >= sizeof e.ops) { fprintf(stderr, "%s:%d: too many operands\n", path, ln); ok = false; continue; }
-        if (strcmp(o, "-") == 0) { /* whole-word instruction (LDW): no opcode field */
-            if (strcmp(d, "k") != 0) { fprintf(stderr, "%s:%d: opcode '-' needs operand code 'k'\n", path, ln); ok = false; continue; }
-            e.whole = true;
+        mnemonic = TrimWhitespace(fields[0]);
+        if (EqualsIgnoreCase(mnemonic, "mnemonic")) continue; /* header row */
+        if (fieldCount < 2) { fprintf(stderr, "%s:%d: need mnemonic,opcode,operands\n", path, lineNumber); allRowsValid = false; continue; }
+        opcodeText = TrimWhitespace(fields[1]); operandText = fieldCount > 2 ? TrimWhitespace(fields[2]) : (char *)"";
+        memset(&entry, 0, sizeof entry);
+        if (!IsIdentifier(mnemonic) || strlen(mnemonic) >= sizeof entry.mnemonic) { fprintf(stderr, "%s:%d: bad mnemonic '%s'\n", path, lineNumber, mnemonic); allRowsValid = false; continue; }
+        strcpy(entry.mnemonic, mnemonic);
+        if (strlen(operandText) >= sizeof entry.operandCodes) { fprintf(stderr, "%s:%d: too many operands\n", path, lineNumber); allRowsValid = false; continue; }
+        if (strcmp(opcodeText, "-") == 0) { /* whole-word instruction (LDW): no opcode field */
+            if (strcmp(operandText, "k") != 0) { fprintf(stderr, "%s:%d: opcode '-' needs operand code 'k'\n", path, lineNumber); allRowsValid = false; continue; }
+            entry.isWholeWord = true;
         } else {
-            if (strlen(o) != 5 || strspn(o, "01") != 5) { fprintf(stderr, "%s:%d: opcode must be 5 binary digits (or '-')\n", path, ln); ok = false; continue; }
-            e.opcode = (unsigned)strtoul(o, NULL, 2);
-            for (k = 0; d[k]; k++) {
-                if (!strchr("dabi", d[k]) || memchr(d, d[k], k)) { fprintf(stderr, "%s:%d: bad operand code '%s'\n", path, ln, d); ok = false; break; }
+            if (strlen(opcodeText) != 5 || strspn(opcodeText, "01") != 5) { fprintf(stderr, "%s:%d: opcode must be 5 binary digits (or '-')\n", path, lineNumber); allRowsValid = false; continue; }
+            entry.opcode = (unsigned)strtoul(opcodeText, NULL, 2);
+            for (codeIndex = 0; operandText[codeIndex]; codeIndex++) {
+                if (!strchr("dabi", operandText[codeIndex]) || memchr(operandText, operandText[codeIndex], codeIndex)) { fprintf(stderr, "%s:%d: bad operand code '%s'\n", path, lineNumber, operandText); allRowsValid = false; break; }
             }
-            if (d[k]) continue;
-            if (strchr(d, 'i') && (strchr(d, 'a') || strchr(d, 'b'))) { fprintf(stderr, "%s:%d: 'i' overlaps the a/b fields\n", path, ln); ok = false; continue; }
+            if (operandText[codeIndex]) continue;
+            if (strchr(operandText, 'i') && (strchr(operandText, 'a') || strchr(operandText, 'b'))) { fprintf(stderr, "%s:%d: 'i' overlaps the a/b fields\n", path, lineNumber); allRowsValid = false; continue; }
         }
-        strcpy(e.ops, d); e.nops = (int)strlen(d);
-        if (find_isa(e.mnem)) { fprintf(stderr, "%s:%d: duplicate mnemonic %s\n", path, ln, e.mnem); ok = false; continue; }
-        if (n_isa == MAX_ISA) { fprintf(stderr, "%s: too many instructions\n", path); ok = false; break; }
-        isa[n_isa++] = e;
+        strcpy(entry.operandCodes, operandText); entry.operandCount = (int)strlen(operandText);
+        if (FindISAEntry(entry.mnemonic)) { fprintf(stderr, "%s:%d: duplicate mnemonic %s\n", path, lineNumber, entry.mnemonic); allRowsValid = false; continue; }
+        if (isaEntryCount == MAX_ISA) { fprintf(stderr, "%s: too many instructions\n", path); allRowsValid = false; break; }
+        isaTable[isaEntryCount++] = entry;
     }
-    fclose(f);
-    return ok;
+    fclose(file);
+    return allRowsValid;
 }
