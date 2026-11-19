@@ -65,9 +65,9 @@ int main(int argc, char **argv)
         lines[nlines++] = DuplicateString(buf);
     }
     fclose(f);
-    if (lst && !(state.listing = fopen(lst, "w"))) { fprintf(stderr, "cannot write '%s'\n", lst); return 1; }
-    run_passes(lines, nlines, &state);
-    if (state.listing) fclose(state.listing);
+    if (lst && !(state.listingFile = fopen(lst, "w"))) { fprintf(stderr, "cannot write '%s'\n", lst); return 1; }
+    RunPasses(lines, nlines, &state);
+    if (state.listingFile) fclose(state.listingFile);
     if (errorCount) { fprintf(stderr, "%d error(s); no output written\n", errorCount); return 1; }
     if (!out) {
         char *dot; snprintf(outbuf, sizeof outbuf, "%s", in);
