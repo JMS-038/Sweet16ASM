@@ -19,7 +19,7 @@ typedef struct {
 /* Returns the table entry for mnemonic (letter case ignored), or NULL when there is none. */
 const ISAEntry *FindISAEntry(const char *mnemonic);
 
-/* Reads the CSV table at path (rows of mnemonic,opcode,operands) into the table.
+/* Reads the CSV table at path (rows of mnemonic,opcode,operands) into the table; see isa.c for the format.
  * Each bad row is reported on stderr. Returns false when the file cannot be opened
  * or any row was bad. */
 bool LoadISATable(const char *path);
