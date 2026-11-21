@@ -8,7 +8,7 @@
 #include <stdbool.h>
 
 /* Number of errors reported so far, and the file name shown in error messages.
- * Defined in util.c; the assembler sets sourceName and reads errorCount. */
+ * Defined in util.c; main sets sourceName and reads errorCount. */
 extern int errorCount;
 extern const char *sourceName;
 
@@ -24,7 +24,7 @@ bool EqualsIgnoreCase(const char *first, const char *second);
 /* True when text is a valid identifier: a letter or '_', then letters, digits or '_'. */
 bool IsIdentifier(const char *text);
 
-/* Returns a heap copy of s, or NULL when allocation fails. The caller frees it. */
+/* Returns a heap copy of text, or NULL when allocation fails. The caller frees it. */
 char *DuplicateString(const char *text);
 
 #endif /* UTIL_H */
