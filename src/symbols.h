@@ -6,6 +6,7 @@
 
 #include "constants.h"
 
+/* One defined label: its name, its address in words, and the source line it was defined on. */
 typedef struct { char name[NAME_LEN]; unsigned address; int lineNumber; } Label;
 
 /* The label table. Entries 0..n-1 are defined, in order of definition; use FindLabel to look one up. */
