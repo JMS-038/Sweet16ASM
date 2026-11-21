@@ -9,7 +9,11 @@
 
 #include "constants.h"
 
-/* The result of parsing one source line. The operands pointers point into the line buffer. */
+/* The result of parsing one source line.
+ *   isValid       false when the line is malformed
+ *   hasLabel      the line starts with "label:"; label holds the name
+ *   hasMnemonic   the line has an instruction, pseudo-op or directive; mnemonic holds its name
+ *   operands      the operand texts, which point into the line buffer; operandCount says how many */
 typedef struct {
     bool  isValid, hasLabel, hasMnemonic;
     char  label[NAME_LEN];
@@ -18,11 +22,11 @@ typedef struct {
     int   operandCount;
 } ParsedLine;
 
-/* Parses "rN" (N = 0..7, either case) into *r. Returns false for anything else. */
+/* Parses "rN" (N = 0..7, either case) into *registerNumber. Returns false for anything else. */
 bool ParseRegister(const char *text, int *registerNumber);
 
-/* Parses a decimal, 0x hex or 0b binary number with an optional sign into *out.
- * Returns false when s is not a number or does not fit in a long. */
+/* Parses a decimal, 0x hex or 0b binary number with an optional sign into *valueOut.
+ * Returns false when text is not a number or does not fit in a long. */
 bool ParseNumber(const char *text, long *valueOut);
 
 /* Splits buffer (modified in place) into parsed->label, parsed->mnemonic and parsed->operands.
