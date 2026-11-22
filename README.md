@@ -73,9 +73,9 @@ These are conveniences built on the real instructions. They are not part of the 
 | `MOV rd, ra` | `ADD rd, ra, r0` | |
 | `CLR rd` | `ADD rd, r0, r0` | |
 | `JMP rt, label` | `LDI rt, offset` then `J rt` | 2 words. `rt` is an explicit scratch register (r1 to r7). |
-| `JZL ra, rt, label` | `LDI rt, offset` then `JZ ra, rt` | 2 words. Jumps to `label` if `ra` is 0. |
+| `JZL ra, rt, label` | `LDI rt, offset` then `JZ ra, rt` | 2 words. Jumps to `label` if `ra` is 0. `rt` must differ from `ra`: the offset is loaded into `rt` before `ra` is tested. |
 | `LJMP label` | `LDW offset` then `J r7` | 2 words. Reaches -16384 to 16383 words, but **overwrites R7**. |
-| `LJZ ra, label` | `LDW offset` then `JZ ra, r7` | 2 words. Same reach; overwrites R7. |
+| `LJZ ra, label` | `LDW offset` then `JZ ra, r7` | 2 words. Same reach; overwrites R7, so `ra` cannot be R7. |
 
 **Why jumps need a scratch register.** `J`, `JZ` and `JAL` are register-relative:
 `PC <- PC + R[B]`, where `PC` is the address of the jump instruction itself. A
