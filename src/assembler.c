@@ -49,8 +49,8 @@ static int StatementSize(const ParsedLine *parsed)
  */
 static void ApplyOrgDirective(const ParsedLine *parsed, unsigned *address, int lineNumber, bool reportErrors)
 {
-    long target;
-    if (parsed->operandCount != 1 || !ParseNumber(parsed->operands[0], &target) || target < 0 || target >= MEM_WORDS) {
+    long long target;
+    if (parsed->operandCount != 1 || ParseNumber(parsed->operands[0], &target) != NUMBER_VALID || target < 0 || target >= MEM_WORDS) {
         if (reportErrors) ReportError(lineNumber, ".org needs one address in 0..65535");
         return;
     }
@@ -67,7 +67,7 @@ static void ApplyOrgDirective(const ParsedLine *parsed, unsigned *address, int l
  * Returns true on success. Otherwise it reports an error and returns false without setting *wordOut:
  * unknown mnemonic, wrong operand count, a register that is not r0-r7, an immediate outside
  * IMM_MIN..IMM_MAX, or an LDW operand that is neither a number nor a defined label or is outside
- * K_MIN..K_MAX.
+ * K_MIN..K_MAX. A number too large to hold is reported as out of range, not as "not a number".
  * Word layout: bits 15:14 = 01 (PREFIX_BITS), bits 13:9 = the opcode, then each operand goes in the
  * field its code names in isa.csv: d = bits 8:6, a = bits 5:3, b = bits 2:0 (registers), i = bits 5:0
  * (a 6-bit immediate). The whole-word instruction LDW has no fields: the word is the value itself.
@@ -79,15 +79,18 @@ static bool EncodeInstruction(int lineNumber, const char *mnemonic, char *const 
     if (!entry) { ReportError(lineNumber, "unknown instruction '%s'", mnemonic); return false; }
     if (operandCount != entry->operandCount) { ReportError(lineNumber, "%s takes %d operand(s), got %d", entry->mnemonic, entry->operandCount, operandCount); return false; }
     if (entry->isWholeWord) { /* LDW k: the instruction word is k itself (00.. for k>=0, 11.. for k<0) */
-        long value;
+        long long value;
+        NumberStatus status = ParseNumber(operands[0], &value);
+        /* a number too large to hold is out of range; the text is shown because there is no value to print */
+        if (status == NUMBER_TOO_LARGE) { ReportError(lineNumber, "%s value %s out of range (%d..%d)", entry->mnemonic, operands[0], K_MIN, K_MAX); return false; }
         /* not a number: it must be a label, which pass 1 has already defined */
-        if (!ParseNumber(operands[0], &value)) {
+        if (status == NUMBER_NOT_A_NUMBER) {
             int labelIndex = FindLabel(operands[0]);
             if (labelIndex < 0) { ReportError(lineNumber, "'%s' is neither a number nor a defined label", operands[0]); return false; }
-            value = (long)labelTable[labelIndex].address;
-            if (value > K_MAX) { ReportError(lineNumber, "label '%s' (address 0x%04lX) does not fit %s (max %d)", operands[0], value, entry->mnemonic, K_MAX); return false; }
+            value = (long long)labelTable[labelIndex].address;
+            if (value > K_MAX) { ReportError(lineNumber, "label '%s' (address 0x%04X) does not fit %s (max %d)", operands[0], (unsigned)value, entry->mnemonic, K_MAX); return false; }
         }
-        if (value < K_MIN || value > K_MAX) { ReportError(lineNumber, "%s value %ld out of range (%d..%d)", entry->mnemonic, value, K_MIN, K_MAX); return false; }
+        if (value < K_MIN || value > K_MAX) { ReportError(lineNumber, "%s value %lld out of range (%d..%d)", entry->mnemonic, value, K_MIN, K_MAX); return false; }
         *wordOut = (uint16_t)(value & 0xFFFF);
         return true;
     }
@@ -97,9 +100,12 @@ static bool EncodeInstruction(int lineNumber, const char *mnemonic, char *const 
     for (index = 0; index < operandCount; index++) {
         char code = entry->operandCodes[index];
         if (code == 'i') {
-            long value;
-            if (!ParseNumber(operands[index], &value)) { ReportError(lineNumber, "'%s' is not a number", operands[index]); return false; }
-            if (value < IMM_MIN || value > IMM_MAX) { ReportError(lineNumber, "immediate %ld out of range (%d..%d)", value, IMM_MIN, IMM_MAX); return false; }
+            long long value;
+            NumberStatus status = ParseNumber(operands[index], &value);
+            if (status == NUMBER_NOT_A_NUMBER) { ReportError(lineNumber, "'%s' is not a number", operands[index]); return false; }
+            /* a number too large to hold is out of range; the text is shown because there is no value to print */
+            if (status == NUMBER_TOO_LARGE) { ReportError(lineNumber, "immediate %s out of range (%d..%d)", operands[index], IMM_MIN, IMM_MAX); return false; }
+            if (value < IMM_MIN || value > IMM_MAX) { ReportError(lineNumber, "immediate %lld out of range (%d..%d)", value, IMM_MIN, IMM_MAX); return false; }
             word |= (unsigned)(value & 0x3F);
         } else {
             int registerNumber;
@@ -204,9 +210,12 @@ static void AssembleStatement(const AssemblerState *state, const ParsedLine *par
 {
     static char r0Text[] = "r0"; uint16_t word; char *addOperands[3];
     if (EqualsIgnoreCase(parsed->mnemonic, ".word")) {
-        long value;
+        long long value;
+        NumberStatus status;
         if (parsed->operandCount != 1) { ReportError(lineNumber, ".word takes one value"); return; }
-        if (ParseNumber(parsed->operands[0], &value)) {
+        status = ParseNumber(parsed->operands[0], &value);
+        if (status == NUMBER_TOO_LARGE) { ReportError(lineNumber, ".word value out of 16-bit range"); return; }
+        if (status == NUMBER_VALID) {
             if (value < -32768 || value > 65535) { ReportError(lineNumber, ".word value out of 16-bit range"); return; }
         } else {
             int labelIndex = FindLabel(parsed->operands[0]);

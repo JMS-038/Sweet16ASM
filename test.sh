@@ -51,6 +51,13 @@ expect_err "trailing comma"    'ADD r1, r2,\n'           'empty operand'
 expect_err "jump out of range" 'a: NOP\n.org 100\nJMP r1, a\n' 'words away'
 expect_err "LDW too big"       'LDW 16384\n'           'out of range'
 expect_err "LDW too small"     'LDW -16385\n'          'out of range'
+expect_err "LDI huge literal"   'LDI r1, 99999999999999999999\n'  'immediate 99999999999999999999 out of range'
+expect_err "LDI huge negative"  'LDI r1, -99999999999999999999\n' 'immediate -99999999999999999999 out of range'
+expect_err "LDI hex too large"  'LDI r1, 0xFFFFFFFFFFFFFFFFF\n'   'immediate 0xFFFFFFFFFFFFFFFFF out of range'
+expect_err "LDI above 2^31"     'LDI r1, 5000000000\n'            'immediate 5000000000 out of range'
+expect_err "LDW huge literal"   'LDW 99999999999999999999\n'      'LDW value 99999999999999999999 out of range'
+expect_err ".word huge literal" '.word 99999999999999999999\n'    'out of 16-bit range'
+expect_err "LDI not a number"   'LDI r1, 12abc\n'                 "'12abc' is not a number"
 expect_err "LDW label too far" '.org 20000\ny: NOP\nLDW y\n' 'does not fit'
 expect_err "JMP hints LJMP"    'a: NOP\n.org 100\nJMP r1, a\n' 'LJMP'
 expect_err "LJMP out of range" 'LJMP a\n.org 20000\na: NOP\n' 'words away'
@@ -83,6 +90,10 @@ $ASM -l $T/zl.lst -o $T/zl.hex $T/zl.asm >/dev/null && [ "$(sed -n 2p $T/zl.lst 
 printf 'a: NOP\nJZL r0, r5, a\nLJZ r0, a\n' > $T/z0.asm   # r0 as the condition register is not a clash
 $ASM -l $T/z0.lst -o $T/z0.hex $T/z0.asm >/dev/null && [ "$(sed -n 3p $T/z0.lst | cut -c1-10)" = "0002: 5405" ] && [ "$(sed -n 5p $T/z0.lst | cut -c1-10)" = "0004: 5407" ] \
   && ok "JZL/LJZ with r0 as the condition" || bad "JZL/LJZ r0 condition"
+# 9d. Numbers at the edge of every field, in every notation, still assemble (guards the number parser)
+printf 'LDI r1, 31\nLDI r2, -32\nLDI r3, 0x1F\nLDI r4, 0b11111\nLDW 16383\nLDW -16384\n.word 65535\n.word -32768\n.word 0x7FFF\n.org 0x20\nNOP\n' > $T/nb.asm
+$ASM -l $T/nb.lst -o $T/nb.hex $T/nb.asm >/dev/null && [ "$(cut -c7-10 $T/nb.lst | tr '\n' ' ')" = "525F 52A0 52DF 531F 3FFF C000 FFFF 8000 7FFF 4200 " ] \
+  && ok "numbers at the field limits" || bad "numbers at the field limits"
 
 # 10. ISA table rule: opcode '-' (whole-word) must use operand code 'k'
 printf 'mnemonic,opcode,operands\nFOO,-,dab\n' > $T/bad.csv; printf 'NOP\n' > $T/n.asm
