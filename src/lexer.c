@@ -27,26 +27,32 @@ bool ParseRegister(const char *text, int *registerNumber)
 
 /*
  * ParseNumber - parse an integer operand: decimal, 0x hex or 0b binary, with an optional + or - sign.
- * On success stores the value in *valueOut and returns true. Returns false when text is not a
- * number, has characters left over, or does not fit in a long. Callers cannot tell those cases apart.
+ * Returns NUMBER_VALID and stores the value in *valueOut when text is a number that fits in a long long.
+ * Returns NUMBER_NOT_A_NUMBER when it is not a number at all (empty, "-", "0x", or characters left
+ * over such as "0x1g" or "1_0"), and NUMBER_TOO_LARGE when it is made only of valid digits but is too
+ * large for a long long. Callers use the difference to say "not a number" or "out of range".
+ * A long long is at least 64 bits on every platform, so the same text gives the same result everywhere
+ * (a plain long is only 32 bits on Windows).
  */
-bool ParseNumber(const char *text, long *valueOut)
+NumberStatus ParseNumber(const char *text, long long *valueOut)
 {
-    const char *digits = text; bool isNegative = false; int base = 10; char *end; long value;
+    const char *digits = text; bool isNegative = false; int base = 10; char *end; long long value;
     /* optional sign; it is applied after the digits are parsed, so "-0x10" is -16 */
     if (*digits == '-') { isNegative = true; digits++; } else if (*digits == '+') digits++;
     /* optional 0x (hex) or 0b (binary) prefix; otherwise the number is decimal */
     if (digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X')) { base = 16; digits += 2; }
     else if (digits[0] == '0' && (digits[1] == 'b' || digits[1] == 'B')) { base = 2; digits += 2; }
-    /* reject an empty digit string ("-", "0x"), which strtol would read as 0 */
-    if (!isalnum((unsigned char)*digits)) return false;
-    /* strtol reports a value too large for a long only through errno, so clear it first and check it after */
+    /* reject an empty digit string ("-", "0x"), which strtoll would read as 0 */
+    if (!isalnum((unsigned char)*digits)) return NUMBER_NOT_A_NUMBER;
+    /* strtoll reports a value too large for a long long only through errno, so clear it first and check it after */
     errno = 0;
-    value = strtol(digits, &end, base);
-    /* characters left over (such as "0x1g" or "1_0"), or overflow: not a valid number */
-    if (*end != '\0' || errno) return false;
+    value = strtoll(digits, &end, base);
+    /* characters left over (such as "0x1g" or "1_0"): not a number, even if the digits before them were too many */
+    if (*end != '\0') return NUMBER_NOT_A_NUMBER;
+    /* nothing but valid digits, but too many of them to hold */
+    if (errno == ERANGE) return NUMBER_TOO_LARGE;
     *valueOut = isNegative ? -value : value;
-    return true;
+    return NUMBER_VALID;
 }
 
 /* ---------- line parsing ---------- */

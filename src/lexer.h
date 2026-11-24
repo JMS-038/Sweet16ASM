@@ -25,9 +25,16 @@ typedef struct {
 /* Parses "rN" (N = 0..7, either case) into *registerNumber. Returns false for anything else. */
 bool ParseRegister(const char *text, int *registerNumber);
 
-/* Parses a decimal, 0x hex or 0b binary number with an optional sign into *valueOut.
- * Returns false when text is not a number or does not fit in a long. */
-bool ParseNumber(const char *text, long *valueOut);
+/* The outcome of ParseNumber. */
+typedef enum {
+    NUMBER_VALID,        /* text is a number that fits in a long long; the value is stored */
+    NUMBER_NOT_A_NUMBER, /* text is not a number at all */
+    NUMBER_TOO_LARGE     /* text is a number, but too large for a long long */
+} NumberStatus;
+
+/* Parses a decimal, 0x hex or 0b binary number with an optional sign into *valueOut (set only when
+ * the result is NUMBER_VALID). */
+NumberStatus ParseNumber(const char *text, long long *valueOut);
 
 /* Splits buffer (modified in place) into parsed->label, parsed->mnemonic and parsed->operands.
  * parsed->isValid is false when the line is malformed; the error is reported only when reportErrors is true. */
