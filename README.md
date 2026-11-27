@@ -38,8 +38,11 @@ usage: sweet16asm [-i isa.csv] [-o out] [-f v3|bin] [-l listing] input.asm
       bin = raw 64K big-endian 16-bit words (131072 bytes)
 ```
 
-Any error is reported as `file:line: error: message`, and no output file is
-written unless the whole program assembles cleanly.
+Any error is reported as `file:line: error: message`, and no output file or
+listing is written unless the whole program assembles cleanly. The output (`-o`, or the
+default `<input>.hex` / `<input>.bin`) and the listing (`-l`) are refused with exit code 2,
+before anything is created or changed, if either is the input file, the ISA table or each
+other.
 
 ## Source syntax
 
@@ -220,7 +223,7 @@ src/lexer.c      splits a source line into label, mnemonic and operands; parses 
 src/symbols.c    the label table
 src/isa.c        loads isa.csv and looks up instructions
 src/output.c     the assembled image and the writers (Logisim hex, raw binary)
-src/util.c       error reporting and string helpers
+src/util.c       error reporting, string helpers and the same-file check
 src/*.h          one header per module, plus constants.h (shared size limits)
 isa.csv          instruction table loaded at startup
 Makefile         make / make test / make clean

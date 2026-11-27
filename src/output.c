@@ -1,6 +1,7 @@
 /*
  * output.c - the assembled ROM image (the one shared Image) and the two writers that save it:
- * raw binary and Logisim "v3.0 hex words addressed" text.
+ * raw binary and Logisim "v3.0 hex words addressed" text. Also PublishListing, which saves the
+ * listing once assembly has succeeded.
  */
 #include <stdbool.h>
 #include <stdint.h>
@@ -53,4 +54,26 @@ bool WriteV3Image(const char *path)
     }
     /* fclose can fail when the final buffered write does, so its result counts */
     return fclose(file) == 0;
+}
+
+/*
+ * PublishListing - save the finished listing to its real file. The passes write the listing to a
+ * temporary file, and main calls this only when assembly had no errors, so a failed run never leaves
+ * a partial listing behind.
+ * temporaryFile: the open temporary file holding the listing.
+ * path: the listing file to create (overwritten if it exists). Opened in text mode, as the listing
+ * always was.
+ * Returns true on success; false if the file cannot be opened, written or closed cleanly.
+ */
+bool PublishListing(FILE *temporaryFile, const char *path)
+{
+    FILE *file; char chunk[4096]; size_t count; bool wroteAll = true;
+    if (fflush(temporaryFile) != 0) return false;
+    rewind(temporaryFile);
+    if (!(file = fopen(path, "w"))) return false;
+    /* copy the temporary file in chunks until it is used up or a write fails */
+    while ((count = fread(chunk, 1, sizeof chunk, temporaryFile)) > 0)
+        if (fwrite(chunk, 1, count, file) != count) { wroteAll = false; break; }
+    /* fclose can fail when the final buffered write does, so its result counts */
+    return fclose(file) == 0 && wroteAll;
 }
