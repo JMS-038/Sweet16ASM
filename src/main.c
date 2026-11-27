@@ -45,12 +45,13 @@ static void PrintUsage(void)
  * Steps: read the options, load the ISA table, read the source lines, run the two passes and, only if
  * no error was reported, write the image and print a one-line summary.
  * Returns 0 on success; 1 when a file cannot be read or written or any assembly error was reported
- * (no output is written then); 2 for a bad command line.
+ * (no output or listing is written then); 2 for a bad command line, or for an output or listing path
+ * that is the input file, the ISA table or each other (nothing is created or changed then).
  */
 int main(int argc, char **argv)
 {
     const char *isaPath = "isa.csv", *outputPath = NULL, *format = "v3", *listingPath = NULL, *inputPath = NULL;
-    char **lines = NULL, lineBuffer[LINE_LEN], defaultOutputPath[512]; int lineCount = 0, capacity = 0, argIndex; FILE *sourceFile; bool wroteOutput;
+    char **lines = NULL, lineBuffer[LINE_LEN], defaultOutputPath[512]; int lineCount = 0, capacity = 0, argIndex; FILE *sourceFile; bool wroteOutput, wroteListing;
     AssemblerState state = { NULL };
     /* read the options; the one argument that is not an option is the input file */
     for (argIndex = 1; argIndex < argc; argIndex++) {
@@ -64,6 +65,23 @@ int main(int argc, char **argv)
     }
     /* an input file is required, and the format must be v3 or bin */
     if (!inputPath || (strcmp(format, "bin") && strcmp(format, "v3"))) { PrintUsage(); return 2; }
+    /* default output name: the input name with its extension replaced by .hex (v3) or .bin;
+     * a '.' in a directory name is not an extension. Worked out now so it can be checked below. */
+    if (!outputPath) {
+        char *lastDot; snprintf(defaultOutputPath, sizeof defaultOutputPath, "%s", inputPath);
+        lastDot = strrchr(defaultOutputPath, '.'); if (lastDot && !strchr(lastDot, '/') && !strchr(lastDot, '\\')) *lastDot = '\0';
+        strncat(defaultOutputPath, strcmp(format, "bin") ? ".hex" : ".bin", sizeof defaultOutputPath - strlen(defaultOutputPath) - 1);
+        outputPath = defaultOutputPath;
+    }
+    /* refuse before any file is created or truncated: the output and the listing must not be the input
+     * file, the ISA table or each other (IsSameFile also catches "./a" vs "a" and symlinks) */
+    if (IsSameFile(outputPath, inputPath))   { fprintf(stderr, "output file '%s' is the input file '%s'; refusing to overwrite it\n", outputPath, inputPath); return 2; }
+    if (IsSameFile(outputPath, isaPath))     { fprintf(stderr, "output file '%s' is the ISA table '%s'; refusing to overwrite it\n", outputPath, isaPath); return 2; }
+    if (listingPath) {
+        if (IsSameFile(listingPath, inputPath)) { fprintf(stderr, "listing file '%s' is the input file '%s'; refusing to overwrite it\n", listingPath, inputPath); return 2; }
+        if (IsSameFile(listingPath, isaPath))   { fprintf(stderr, "listing file '%s' is the ISA table '%s'; refusing to overwrite it\n", listingPath, isaPath); return 2; }
+        if (IsSameFile(listingPath, outputPath)) { fprintf(stderr, "listing file and output file are both '%s'\n", outputPath); return 2; }
+    }
     /* error messages show the input path */
     sourceName = inputPath;
     if (!LoadISATable(isaPath)) return 1;
@@ -87,20 +105,21 @@ int main(int argc, char **argv)
         lines[lineCount++] = DuplicateString(lineBuffer);
     }
     fclose(sourceFile);
-    /* open the listing file if one was asked for; the passes write to it */
-    if (listingPath && !(state.listingFile = fopen(listingPath, "w"))) { fprintf(stderr, "cannot write '%s'\n", listingPath); return 1; }
+    /* if a listing was asked for, the passes write it to a temporary file; it is copied to the real
+     * file below, and only when there were no errors */
+    if (listingPath && !(state.listingFile = tmpfile())) { fprintf(stderr, "cannot create a temporary file for the listing\n"); return 1; }
     /* assemble; every problem is reported as it is found and counted in errorCount */
     RunPasses(lines, lineCount, &state);
-    if (state.listingFile) fclose(state.listingFile);
-    /* no output file is written when there were errors */
-    if (errorCount) { fprintf(stderr, "%d error(s); no output written\n", errorCount); return 1; }
-    /* default output name: the input name with its extension replaced by .hex (v3) or .bin;
-     * a '.' in a directory name is not an extension */
-    if (!outputPath) {
-        char *lastDot; snprintf(defaultOutputPath, sizeof defaultOutputPath, "%s", inputPath);
-        lastDot = strrchr(defaultOutputPath, '.'); if (lastDot && !strchr(lastDot, '/') && !strchr(lastDot, '\\')) *lastDot = '\0';
-        strncat(defaultOutputPath, strcmp(format, "bin") ? ".hex" : ".bin", sizeof defaultOutputPath - strlen(defaultOutputPath) - 1);
-        outputPath = defaultOutputPath;
+    /* no output or listing file is written when there were errors */
+    if (errorCount) {
+        if (state.listingFile) fclose(state.listingFile);
+        fprintf(stderr, "%d error(s); no output written\n", errorCount);
+        return 1;
+    }
+    /* assembly succeeded: save the listing */
+    if (state.listingFile) {
+        wroteListing = PublishListing(state.listingFile, listingPath); fclose(state.listingFile);
+        if (!wroteListing) { fprintf(stderr, "cannot write '%s'\n", listingPath); return 1; }
     }
     /* save the image in the chosen format */
     wroteOutput = strcmp(format, "bin") ? WriteV3Image(outputPath) : WriteBinImage(outputPath);

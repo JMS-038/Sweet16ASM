@@ -1,6 +1,6 @@
 /*
- * util.h - shared helpers for the Sweet16 assembler: error reporting and
- * string utilities.
+ * util.h - shared helpers for the Sweet16 assembler: error reporting, string
+ * utilities and the same-file check used before any output file is written.
  */
 #ifndef UTIL_H
 #define UTIL_H
@@ -26,5 +26,9 @@ bool IsIdentifier(const char *text);
 
 /* Returns a heap copy of text, or NULL when allocation fails. The caller frees it. */
 char *DuplicateString(const char *text);
+
+/* True when the two paths name the same file ("./a" and "a", a symlink and its target). A path that
+ * does not exist yet matches only a path that is written the same way. */
+bool IsSameFile(const char *first, const char *second);
 
 #endif /* UTIL_H */

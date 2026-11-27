@@ -100,5 +100,29 @@ printf 'mnemonic,opcode,operands\nFOO,-,dab\n' > $T/bad.csv; printf 'NOP\n' > $T
 if $ASM -i $T/bad.csv -o $T/n.hex $T/n.asm 2>$T/c.err >/dev/null; then bad "bad ISA row accepted"
 elif grep -q "needs operand code" $T/c.err; then ok "ISA table validation"; else bad "ISA table message"; fi
 
+# 11. Output handling: never overwrite an input, never leave a listing behind after a failed run
+printf 'NOP\n' > $T/c.asm; cp $T/c.asm $T/c.orig
+expect_refuse() { # args: the assembler arguments; $NAME is the test name. The source c.asm must stay unchanged.
+  if $ASM "$@" >/dev/null 2>$T/r.err; then bad "$NAME (should refuse)"
+  elif grep -q "refusing\|both" $T/r.err && cmp -s $T/c.asm $T/c.orig; then ok "$NAME"; else bad "$NAME (wrong message or source changed)"; fi; }
+NAME="-o is the input";             expect_refuse -o $T/c.asm $T/c.asm
+NAME="-o is the input (./ form)";   expect_refuse -o $T/./c.asm $T/c.asm
+NAME="-l is the input";             expect_refuse -l $T/c.asm -o $T/o.hex $T/c.asm
+NAME="-l is the input (./ form)";   expect_refuse -l $T/./c.asm -o $T/o.hex $T/c.asm
+NAME="-l and -o are the same file"; expect_refuse -l $T/o.hex -o $T/./o.hex $T/c.asm
+NAME="-l and -o (.// form)";        expect_refuse -l $T/o.hex -o $T/.//o.hex $T/c.asm
+cp isa.csv $T/isa.orig; $ASM -i $T/isa.orig -o $T/isa.orig $T/c.asm >/dev/null 2>&1
+cmp -s isa.csv $T/isa.orig && ok "-o is the ISA table" || bad "-o is the ISA table"
+cp $T/c.asm $T/dflt.hex; cp $T/c.asm $T/dflt.orig       # default output name (input.hex) equals the input
+if $ASM $T/dflt.hex >/dev/null 2>&1; then bad "default output == input (should refuse)"
+elif cmp -s $T/dflt.hex $T/dflt.orig; then ok "default output == input refused"; else bad "default output == input: source changed"; fi
+if ln -s c.asm $T/link.asm 2>/dev/null && [ -L $T/link.asm ]; then   # symlinks need privileges on Windows: skip there
+  NAME="-o is a symlink to the input"; expect_refuse -o $T/link.asm $T/c.asm
+fi
+printf 'NOP\nBOGUS r1\n' > $T/f.asm; rm -f $T/f.lst
+$ASM -l $T/f.lst -o $T/f.hex $T/f.asm >/dev/null 2>&1; [ ! -e $T/f.lst ] && [ ! -e $T/f.hex ] && ok "failed assembly leaves no listing" || bad "failed assembly left a listing or output"
+printf 'NOP\n' > $T/g.asm
+$ASM -l $T/g.lst -o $T/g.hex $T/g.asm >/dev/null 2>&1 && [ "$(cat $T/g.lst)" = "0000: 4200  NOP" ] && ok "listing written on success" || bad "listing on success"
+
 rm -rf $T
 [ $fail -eq 0 ] && echo "ALL TESTS PASSED" || { echo "SOME TESTS FAILED"; exit 1; }
