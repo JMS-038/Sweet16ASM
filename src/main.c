@@ -40,6 +40,19 @@ static void PrintUsage(void)
 }
 
 /*
+ * FreeLines - release the source lines read by main: each line, then the array that holds them.
+ * lines: the array (may be NULL when nothing was read).
+ * lineCount: how many entries of lines are in use.
+ */
+static void FreeLines(char **lines, int lineCount)
+{
+    int index;
+    /* one line per pass; free(NULL) is harmless, so a line whose copy failed needs no special case */
+    for (index = 0; index < lineCount; index++) free(lines[index]);
+    free(lines);
+}
+
+/*
  * main - assemble the file named on the command line.
  * Usage: sweet16asm [-i isa.csv] [-o out] [-f v3|bin] [-l listing] input.asm
  * Steps: read the options, load the ISA table, read the source lines, run the two passes and, only if
@@ -99,17 +112,26 @@ int main(int argc, char **argv)
         }
         /* strip the line ending (\n or \r\n) */
         lineBuffer[strcspn(lineBuffer, "\r\n")] = '\0';
-        /* double the array when it is full (it starts with room for 128 lines) */
-        if (lineCount == capacity) { capacity = capacity ? capacity * 2 : 128; lines = realloc(lines, (size_t)capacity * sizeof *lines); if (!lines) return 1; }
-        /* the lines are never freed: the program ends right after assembling */
-        lines[lineCount++] = DuplicateString(lineBuffer);
+        /* double the array when it is full (it starts with room for 128 lines); grow into a spare
+         * pointer so that a failed realloc does not lose the array that is already filled */
+        if (lineCount == capacity) {
+            int newCapacity = capacity ? capacity * 2 : 128; char **grown = realloc(lines, (size_t)newCapacity * sizeof *lines);
+            if (!grown) { fprintf(stderr, "out of memory\n"); FreeLines(lines, lineCount); fclose(sourceFile); return 1; }
+            lines = grown; capacity = newCapacity;
+        }
+        /* keep a copy of the line; the lines are freed by FreeLines once the passes are done */
+        if (!(lines[lineCount] = DuplicateString(lineBuffer))) { fprintf(stderr, "out of memory\n"); FreeLines(lines, lineCount); fclose(sourceFile); return 1; }
+        lineCount++;
     }
     fclose(sourceFile);
     /* if a listing was asked for, the passes write it to a temporary file; it is copied to the real
      * file below, and only when there were no errors */
-    if (listingPath && !(state.listingFile = tmpfile())) { fprintf(stderr, "cannot create a temporary file for the listing\n"); return 1; }
+    if (listingPath && !(state.listingFile = tmpfile())) { fprintf(stderr, "cannot create a temporary file for the listing\n"); FreeLines(lines, lineCount); return 1; }
     /* assemble; every problem is reported as it is found and counted in errorCount */
     RunPasses(lines, lineCount, &state);
+    /* the passes copy what they keep (labels go into labelTable, the output into image), so the source
+     * lines are not needed again: free them here, before any of the early returns below */
+    FreeLines(lines, lineCount);
     /* no output or listing file is written when there were errors */
     if (errorCount) {
         if (state.listingFile) fclose(state.listingFile);
