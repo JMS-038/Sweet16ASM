@@ -95,7 +95,7 @@ static bool EncodeInstruction(int lineNumber, const char *mnemonic, char *const 
         return true;
     }
     /* a regular instruction: the fixed prefix and the opcode first, then the operand fields below */
-    word = PREFIX_BITS | (entry->opcode << 9);
+    word = PREFIX_BITS | (entry->opcode << OPCODE_SHIFT);
     /* place each operand in the field its operand code names */
     for (index = 0; index < operandCount; index++) {
         char code = entry->operandCodes[index];
@@ -106,11 +106,11 @@ static bool EncodeInstruction(int lineNumber, const char *mnemonic, char *const 
             /* a number too large to hold is out of range; the text is shown because there is no value to print */
             if (status == NUMBER_TOO_LARGE) { ReportError(lineNumber, "immediate %s out of range (%d..%d)", operands[index], IMM_MIN, IMM_MAX); return false; }
             if (value < IMM_MIN || value > IMM_MAX) { ReportError(lineNumber, "immediate %lld out of range (%d..%d)", value, IMM_MIN, IMM_MAX); return false; }
-            word |= (unsigned)(value & 0x3F);
+            word |= (unsigned)(value & IMM_MASK);
         } else {
             int registerNumber;
             if (!ParseRegister(operands[index], &registerNumber)) { ReportError(lineNumber, "'%s' is not a register (r0-r7)", operands[index]); return false; }
-            word |= (unsigned)registerNumber << (code == 'd' ? 6 : code == 'a' ? 3 : 0);
+            word |= (unsigned)registerNumber << ISAFieldShift(code);
         }
     }
     *wordOut = (uint16_t)word;

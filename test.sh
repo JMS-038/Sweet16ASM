@@ -124,5 +124,101 @@ $ASM -l $T/f.lst -o $T/f.hex $T/f.asm >/dev/null 2>&1; [ ! -e $T/f.lst ] && [ ! 
 printf 'NOP\n' > $T/g.asm
 $ASM -l $T/g.lst -o $T/g.hex $T/g.asm >/dev/null 2>&1 && [ "$(cat $T/g.lst)" = "0000: 4200  NOP" ] && ok "listing written on success" || bad "listing on success"
 
+# 12. Disassembler (-d): every word round-trips, decoding follows the table, bad images are refused
+# 12a. Hand-computed words, one per decoding rule (fields: 01-ooooo-ddd-aaa-bbb, expected text worked out from the bit layout)
+{ echo "v3.0 hex words addressed"
+  echo "0000: 4253 4200 41f5 4c98 4c99 5100 5108 52ff"
+  echo "0008: 521f 5220 5405 5415 5455 5445 5400 5630"
+  echo "0010: 5803 5a50 5c13 7e00 7e01 5e00 7c00 8000"
+  echo "0018: bfff 0000 3fff c000 ffff"; } > $T/dv.hex
+cat > $T/dv.expected <<'EOF'
+        ADD r1, r2, r3
+        ADD r0, r0, r0
+        SLT r7, r6, r5
+        SLL r2, r3
+        .word 0x4C99
+        IN r4
+        .word 0x5108
+        LDI r3, -1
+        LDI r0, 31
+        LDI r0, -32
+        J r5
+        JZ r2, r5
+        JAL r1, r2, r5
+        JAL r1, r0, r5
+        J r0
+        JR r6
+        OUT r3
+        LD r1, r2
+        ST r2, r3
+        RESET
+        .word 0x7E01
+        .word 0x5E00
+        .word 0x7C00
+        .word 0x8000
+        .word 0xBFFF
+        LDW 0
+        LDW 16383
+        LDW -16384
+        LDW -1
+EOF
+$ASM -d $T/dv.hex -o $T/dv.asm >/dev/null 2>&1 && cmp -s $T/dv.asm $T/dv.expected && ok "disassembler: one word per decoding rule (canonical J/JZ/JAL, .word, LDW limits)" || bad "disassembler: decoding rules"
+$ASM -o $T/dv2.hex $T/dv.asm >/dev/null 2>&1 && cmp -s $T/dv2.hex $T/dv.hex && ok "disassembler: those words reassemble to the same image" || bad "disassembler: decoding-rule words do not reassemble"
+# 12a2. Windows line endings, tabs, upper-case hex and short words are accepted on input
+printf 'v3.0 hex words addressed\r\n0000:\t5400   5C1B\r\n\r\n0002: 4\r\n' > $T/crlf.hex
+printf '        J r0\n        ST r3, r3\n        LDW 4\n' > $T/crlf.expected
+$ASM -d $T/crlf.hex 2>/dev/null | cmp -s - $T/crlf.expected && ok "disassembler: CRLF, tabs, upper-case hex, short words" || bad "disassembler: lenient v3 input"
+# 12b. Rows that do not run on from each other give a .org
+printf 'v3.0 hex words addressed\n0000: 5400\n0010: 5400\n' > $T/gap.hex
+printf '        J r0\n        .org 0x0010\n        J r0\n' > $T/gap.expected
+$ASM -d $T/gap.hex -o $T/gap.asm >/dev/null 2>&1 && cmp -s $T/gap.asm $T/gap.expected && ok "disassembler: gap in a v3 file -> .org" || bad "disassembler: .org for a gap"
+# 12c. The real Logisim image reassembles to the same file; the text is the fixture apart from its header comment
+$ASM -d tests/program_rom_matrix_marshall.expected.hex -o $T/mmd.asm >/dev/null 2>&1 && $ASM -o $T/mmd.hex $T/mmd.asm >/dev/null 2>&1 \
+  && cmp -s $T/mmd.hex tests/program_rom_matrix_marshall.expected.hex && ok "disassembler: matrix_marshall image reassembles byte for byte" || bad "disassembler: matrix_marshall round trip"
+sed 1d tests/matrix_marshall.asm | cmp -s - $T/mmd.asm && ok "disassembler: text equals tests/matrix_marshall.asm (minus its header comment)" || bad "disassembler: text differs from tests/matrix_marshall.asm"
+# 12d. Every one of the 65536 words: image word n = n, disassemble, reassemble, compare (the file layout is the one WriteV3Image writes)
+{ echo "v3.0 hex words addressed"
+  for a in 0 1 2 3 4 5 6 7 8 9 a b c d e f; do for b in 0 1 2 3 4 5 6 7 8 9 a b c d e f; do for c in 0 1 2 3 4 5 6 7 8 9 a b c d e f; do
+    echo "$a$b${c}0: $a$b${c}0 $a$b${c}1 $a$b${c}2 $a$b${c}3 $a$b${c}4 $a$b${c}5 $a$b${c}6 $a$b${c}7"
+    echo "$a$b${c}8: $a$b${c}8 $a$b${c}9 $a$b${c}a $a$b${c}b $a$b${c}c $a$b${c}d $a$b${c}e $a$b${c}f"
+  done; done; done; } > $T/all.hex
+$ASM -d $T/all.hex -o $T/all.asm >/dev/null 2>&1 && $ASM -o $T/all2.hex $T/all.asm >/dev/null 2>&1 && cmp -s $T/all2.hex $T/all.hex \
+  && ok "disassembler: all 65536 words round-trip" || bad "disassembler: exhaustive round trip"
+# 12e. The raw reader: same words, same text, whether the format is given or detected; trailing zeros are dropped
+$ASM -f bin -o $T/all.bin $T/all.asm >/dev/null 2>&1
+$ASM -d $T/all.bin -o $T/allb.asm >/dev/null 2>&1 && cmp -s $T/allb.asm $T/all.asm && ok "disassembler: raw image (format detected) == v3 text" || bad "disassembler: raw image differs from v3"
+$ASM -d -f bin $T/all.bin -o $T/allb2.asm >/dev/null 2>&1 && cmp -s $T/allb2.asm $T/all.asm && ok "disassembler: raw image (-f bin)" || bad "disassembler: -f bin"
+$ASM -d $T/p2.bin -o $T/p2d.asm >/dev/null 2>&1 && $ASM -o $T/p2d.hex $T/p2d.asm >/dev/null 2>&1 && cmp -s $T/p2d.hex $T/p2.hex \
+  && ok "disassembler: raw image of a short program, zero padding dropped" || bad "disassembler: short raw image"
+: > $T/empty.asm; $ASM -f bin -o $T/zero.bin $T/empty.asm >/dev/null 2>&1; $ASM -d $T/zero.bin 2>/dev/null | cmp -s - /dev/null && ok "disassembler: all-zero raw image -> no statements" || bad "disassembler: all-zero raw image"
+# 12f. Standard output holds only the assembly; the summary goes to standard error
+$ASM -d $T/dv.hex 2>$T/so.err | cmp -s - $T/dv.expected && grep -q "word(s)" $T/so.err && ok "disassembler: standard output is assembly only" || bad "disassembler: standard output"
+# 12g. The ISA table drives decoding: rename ADD and the disassembler follows
+sed 's/^ADD,/PLUS,/' isa.csv > $T/isa2.csv
+printf 'v3.0 hex words addressed\n0000: 4253\n' > $T/one.hex
+[ "$($ASM -i $T/isa2.csv -d $T/one.hex 2>/dev/null)" = "        PLUS r1, r2, r3" ] && ok "disassembler: decoding follows the ISA table" || bad "disassembler: ISA table not followed"
+# 12h. Bad input is refused with a message, and creates nothing
+expect_dis_err() { # name, image file, grep pattern for the message, optional extra option (e.g. -f v3)
+  rm -f $T/de.asm
+  if $ASM -d $4 $2 -o $T/de.asm >/dev/null 2>$T/de.err; then bad "$1 (should fail)"
+  elif grep -q "$3" $T/de.err && [ ! -e $T/de.asm ]; then ok "$1"; else bad "$1 (wrong message or output created)"; fi; }
+printf 'hello\n' > $T/b1.hex;                                                    expect_dis_err "disassembler: no v3 header" $T/b1.hex "not a v3 image" "-f v3"
+: > $T/b2.hex;                                                                   expect_dis_err "disassembler: empty file" $T/b2.hex "not a v3 image" "-f v3"
+expect_dis_err "disassembler: damaged header is read as raw, with a hint to override" $T/b1.hex "guessed from its first bytes"
+printf 'v3.0 hex words addressed\n0000: 5400 zz12\n' > $T/b3.hex;               expect_dis_err "disassembler: bad word" $T/b3.hex "bad word 'zz12'"
+printf 'v3.0 hex words addressed\n0000: 12345\n' > $T/b4.hex;                    expect_dis_err "disassembler: word longer than 4 digits" $T/b4.hex "bad word '12345'"
+printf 'v3.0 hex words addressed\n0000: 5400\n0000: 5400\n' > $T/b5.hex;        expect_dis_err "disassembler: address given twice" $T/b5.hex "given twice"
+printf 'v3.0 hex words addressed\nfffe: 5400 5400 5400\n' > $T/b6.hex;          expect_dis_err "disassembler: row runs past 0xFFFF" $T/b6.hex "beyond the 64K"
+printf 'v3.0 hex words addressed\n10000: 5400\n' > $T/b7.hex;                   expect_dis_err "disassembler: address too wide" $T/b7.hex "bad address"
+printf 'v3.0 hex words addressed\n0000: 3*5400\n' > $T/b8.hex;                  expect_dis_err "disassembler: count*word repeat is not guessed at" $T/b8.hex "bad word '3\*5400'"
+printf 'abc' > $T/short.bin;                                                     expect_dis_err "disassembler: raw image too short" $T/short.bin "131072 bytes"
+{ cat $T/all.bin; printf 'x'; } > $T/long.bin;                                   expect_dis_err "disassembler: raw image too long" $T/long.bin "131072 bytes"
+expect_dis_err "disassembler: image file missing" $T/nonexistent.hex "cannot open"
+# 12i. Option checks: -d takes no listing; the output may not be the image or the ISA table
+$ASM -d -l $T/x.lst $T/dv.hex >/dev/null 2>&1; [ $? -eq 2 ] && [ ! -e $T/x.lst ] && ok "disassembler: -l rejected with -d (exit 2)" || bad "disassembler: -l with -d"
+cp $T/dv.hex $T/dv.keep; $ASM -d -o $T/dv.hex $T/dv.hex >/dev/null 2>$T/same.err; [ $? -eq 2 ] && grep -q refusing $T/same.err && cmp -s $T/dv.hex $T/dv.keep \
+  && ok "disassembler: -o is the image -> refused, image untouched" || bad "disassembler: -o is the image"
+cp isa.csv $T/isa3.csv; $ASM -d -i $T/isa3.csv -o $T/isa3.csv $T/dv.hex >/dev/null 2>&1; [ $? -eq 2 ] && cmp -s isa.csv $T/isa3.csv && ok "disassembler: -o is the ISA table -> refused" || bad "disassembler: -o is the ISA table"
+
 rm -rf $T
 [ $fail -eq 0 ] && echo "ALL TESTS PASSED" || { echo "SOME TESTS FAILED"; exit 1; }
