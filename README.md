@@ -15,6 +15,7 @@ instruction set from a CSV table instead of hard-coding it.
 make                                   # builds ./sweet16asm
 ./sweet16asm examples/program2.asm     # writes examples/program2.hex
 ./sweet16asm -l prog.lst prog.asm      # also writes an address / word / source listing
+./sweet16asm -d image.hex              # disassemble a saved ROM image (prints assembly)
 make test                              # runs the regression tests
 ```
 
@@ -23,7 +24,7 @@ make test                              # runs the regression tests
 `make` and `make test` exactly as above. To use `make` from PowerShell, add `C:\msys64\ucrt64\bin` and
 `C:\msys64\usr\bin` to your Path (in that order). The Makefile picks `gcc` and the `.exe` name
 automatically on Windows. Without `make`, one command also works:
-`gcc -std=c99 -Wall -Wextra -pedantic -O2 -o sweet16asm.exe src/main.c src/util.c src/lexer.c src/symbols.c src/isa.c src/output.c src/assembler.c`
+`gcc -std=c99 -Wall -Wextra -pedantic -O2 -o sweet16asm.exe src/main.c src/util.c src/lexer.c src/symbols.c src/isa.c src/output.c src/assembler.c src/disassembler.c`
 (every `.c` file in `src/`), then
 `.\sweet16asm.exe examples\program2.asm` from the repository folder (the ISA table `isa.csv` is read from
 the current directory unless you pass `-i`). `make test` needs a Unix-style shell, which the MSYS2 terminal provides.
@@ -164,12 +165,67 @@ instruction is a one-line edit with no recompile. Lines starting with `#` are co
   Words after the end of the program are not written, matching the saved ROM files.
 - **`bin`.** The whole 64K-word address space as 131072 bytes, big-endian.
 
+## Disassembler
+
+`sweet16asm -d` goes the other way: it reads a saved ROM image and writes assembly source that
+the assembler turns back into exactly the same words.
+
+```sh
+./sweet16asm -d image.hex                  # assembly on standard output
+./sweet16asm -d -o image.asm image.bin     # or to a file
+./sweet16asm -d -f bin image.bin           # name the format instead of letting it be detected
+```
+
+- **Input.** Both output formats above. Unless `-f v3|bin` is given, a file that starts with
+  `v3.0` is read as `v3` and anything else as `bin`. A `v3` file may have rows anywhere and in any
+  order (an address given twice is an error); words that were not written are skipped with a
+  `.org`. A `bin` file must be exactly 131072 bytes, and the zero words after its last non-zero
+  word are dropped (the writer pads every image with them). Other Logisim forms, such as
+  `3*5400` repeats, are reported as errors rather than guessed at.
+- **Output.** One statement per word, indented 8 spaces, with no labels or comments, as in
+  `tests/matrix_marshall.asm`. Standard output holds only the assembly; the one-line summary goes to
+  standard error (or to standard output when `-o` is used). `-o` may not be the image or the ISA
+  table (exit 2, nothing is touched), and `-l` is not accepted.
+- **Table-driven.** Which opcodes exist and which fields each one uses come from `isa.csv`, read
+  with `-i` just as for assembling. Only the word layout (`01-ooooo-ddd-aaa-bbb`) is in the code,
+  and `isa.c` is the one place that knows it, for the assembler and the disassembler alike.
+
+### How a word is decoded
+
+| Top bits | Written as |
+|---|---|
+| `00` or `11` | `LDW k`, where `k` is the word as a signed 16-bit number (-16384 to 16383) |
+| `01` | the instruction whose opcode is in bits 13:9, if one fits exactly (below) |
+| `10` | `.word 0xNNNN`: no instruction uses this type |
+
+A word is written as `.word 0xNNNN` when no instruction fits it: an unused opcode (15 to 30),
+or an instruction whose unused fields are not all zero (for example `SLL` with a non-zero `b`
+field, which no assembly source can produce). Only exact fits are written as instructions, so
+reassembling the output always gives the same word back.
+
+**One canonical form where encodings overlap.** Several table entries can produce the same word.
+`J rb`, `JZ ra, rb` and `JAL rd, ra, rb` share opcode `01010` and differ only in which of the `d`
+and `a` fields they fill, so `J r5` is the same word as `JZ r0, r5` and as `JAL r0, r0, r5`.
+`NOP`, `MOV` and `CLR` are pseudo-forms of `ADD` with `r0` operands. The rule is:
+
+> Of the table entries that have the word's opcode and could have produced it exactly (every bit
+> below the opcode that the entry does not use is zero), write the one with the **fewest
+> operands**; if two tie, the one that comes first in `isa.csv`.
+
+For the jumps this means a non-zero `d` gives `JAL`, otherwise a non-zero `a` gives `JZ`, otherwise
+`J`. `JAL r1, r0, r5` stays `JAL` because `d` is non-zero. The pseudo-ops are not table entries, so
+the disassembler never writes them: the word `4200` comes out as `ADD r0, r0, r0`, not `NOP`.
+
+**Not done yet** (the optional second phase of issue #18): recognising pseudo-ops (`NOP`, `MOV`,
+`CLR`, and the `LDW`-based long jumps) and inventing labels for jump targets.
+
 ## How it works
 
 The program is a handful of small modules under `src/` (see Repository layout below).
 `main.c` reads the command line and the source file, loads the ISA table, and hands the
 source lines to `assembler.c`, which makes two passes over them. When both passes finish
-without errors, `main.c` saves the image with `output.c`.
+without errors, `main.c` saves the image with `output.c`. With `-d`, `main.c` instead loads a
+saved image with `output.c` and `disassembler.c` writes it out as source.
 
 1. **Pass 1** tokenizes each line (`lexer.c`: strip the comment, split off an optional
    label, split operands on commas), assigns an address to every statement, and records
@@ -191,6 +247,14 @@ without errors, `main.c` saves the image with `output.c`.
   disassembled to `tests/matrix_marshall.asm`, and reassembling that source
   reproduces the saved file **byte for byte**. All 753 words decode as valid
   Sweet16 instructions.
+- **The disassembler.** Disassembling the real ROM image and reassembling the result
+  reproduces the saved file byte for byte, and the text equals `tests/matrix_marshall.asm`
+  apart from that file's header comment (the disassembler writes none). **Every one of the
+  65536 possible words** round-trips (image word *n* = *n*, disassembled, reassembled,
+  compared). Hand-computed words check each decoding rule, including the canonical choice
+  among `J`, `JZ` and `JAL`, which the round trip alone cannot (any exact fit round-trips).
+  Also checked: the `bin` reader, `.org` for gaps, decoding that follows a changed
+  `isa.csv`, malformed images, and the option checks.
 - **Every instruction form,** with expected words computed independently from the
   bit-field table (`tests/vectors.*`), plus `LDW` limits, the pseudo-ops and the `bin` format.
 - **Error handling:** bad register, immediate out of range (`LDI` and `LDW`), wrong operand
@@ -203,10 +267,13 @@ without errors, `main.c` saves the image with `output.c`.
 - The automated tests check the encoder and the file format. They do not run the Logisim circuit.
   As a manual check, `examples/smoke_test.asm` was assembled, loaded into the program ROM and run on
   the machine, and the observed results matched the expected values listed in that file.
-- `matrix_marshall.asm` is disassembler output (no labels or comments). It proves the
-  encoder against a real image, not that any particular source text would have produced it.
+- `matrix_marshall.asm` is disassembler output (no labels or comments), and `-d` now reproduces
+  it. It proves the encoder against a real image, not that any particular source text would have
+  produced it.
 - Unused opcodes (15 to 30 in the summary) and the unused type `10` are not assembler
-  instructions. They can be emitted with `.word`.
+  instructions. They can be emitted with `.word`, and `-d` writes them that way. That type `10`
+  is unused comes from this README and the header of `isa.csv`; it has not been re-checked against
+  the Instruction Summary itself, which is not in the repository.
 - `LDW` always overwrites R7. Per the summary, every word whose top bits are `00` or `11` is an
   `LDW`, so a zero word in unused ROM executes as `LDW 0` rather than doing nothing. Ending a
   program with a deliberate halt (for example a jump to itself) is safer than running off the end.
@@ -217,12 +284,13 @@ without errors, `main.c` saves the image with `output.c`.
 ## Repository layout
 
 ```
-src/main.c       command line: reads the source file, runs the passes, writes the output
+src/main.c       command line: reads the source file, runs the passes, writes the output (or -d)
 src/assembler.c  the two passes: addresses and labels, then encoding
 src/lexer.c      splits a source line into label, mnemonic and operands; parses registers and numbers
 src/symbols.c    the label table
-src/isa.c        loads isa.csv and looks up instructions
-src/output.c     the assembled image and the writers (Logisim hex, raw binary)
+src/disassembler.c  -d: decodes words by their top bits and the ISA table, writes assembly source
+src/isa.c        loads isa.csv, looks up instructions, knows where each operand field sits
+src/output.c     the image, the writers (Logisim hex, raw binary) and the readers for -d
 src/util.c       error reporting, string helpers and the same-file check
 src/*.h          one header per module, plus constants.h (shared size limits)
 isa.csv          instruction table loaded at startup
@@ -231,6 +299,7 @@ test.sh          regression tests
 examples/        program2.asm (explicit offsets), jumps.asm (labels and pseudo-ops),
                  smoke_test.asm (short program to confirm an assembled image runs in Logisim)
 tests/           fixtures: PDF examples, vectors, and the matrix_marshall ROM round trip
+                 (also the disassembler's real-image check)
 ```
 
 ## Code conventions

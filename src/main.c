@@ -2,12 +2,14 @@
  * main.c - command line for sweet16asm, the two-pass assembler for the EE340 Sweet16 MCU.
  * Standard C99 library only.
  * main reads the options and the source file, loads the ISA table, hands the lines to the two passes
- * (assembler.c) and saves the image (output.c). The README lists the other modules.
+ * (assembler.c) and saves the image (output.c). With -d it goes the other way: it reads a saved image
+ * and writes assembly source (disassembler.c). The README lists the other modules.
  *
  * Instruction word: 01-ooooo-ddd-aaa-bbb   (LDI: 01-01001-ddd-iiiiii)
  * The opcode and which operands fill which fields come from isa.csv.
  *
  * Output: Logisim 'v3.0 hex words addressed' text (default) or a raw 64K big-endian image.
+ * With -d the input is such an image and the output is assembly source.
  *
  * Source syntax:
  *   ; comment (everything after ';' is ignored)
@@ -25,6 +27,7 @@
 
 #include "assembler.h"
 #include "constants.h"
+#include "disassembler.h"
 #include "isa.h"
 #include "output.h"
 #include "util.h"
@@ -34,9 +37,12 @@
 static void PrintUsage(void)
 {
     fputs("usage: sweet16asm [-i isa.csv] [-o out] [-f v3|bin] [-l listing] input.asm\n"
+          "       sweet16asm -d [-i isa.csv] [-o out.asm] [-f v3|bin] image\n"
           "  -i  ISA table (default ./isa.csv)\n"
           "  -f  v3  = Logisim 'v3.0 hex words addressed' text (default)\n"
-          "      bin = raw 64K big-endian 16-bit words (131072 bytes)\n", stderr);
+          "      bin = raw 64K big-endian 16-bit words (131072 bytes)\n"
+          "  -d  disassemble: -f then names the format of the image being read (default: detected\n"
+          "      from the file), and the assembly goes to -o, or to standard output without -o\n", stderr);
 }
 
 /*
@@ -53,8 +59,46 @@ static void FreeLines(char **lines, int lineCount)
 }
 
 /*
- * main - assemble the file named on the command line.
+ * RunDisassembler - the -d mode: read a saved image and write it back out as assembly source.
+ * inputPath: the saved image. isaPath: the ISA table. outputPath: where the source goes, or NULL for
+ * standard output. format: "v3" or "bin" for the image, or NULL to detect it from the file.
+ * The image is read completely before the output is opened, so a bad image creates or changes nothing.
+ * Returns 0 on success; 1 when the ISA table or the image cannot be read or is invalid, or the output
+ * cannot be written; 2 when the output file is the image or the ISA table.
+ */
+static int RunDisassembler(const char *inputPath, const char *isaPath, const char *outputPath, const char *format)
+{
+    FILE *out; bool readOk, guessed;
+    /* refuse before any file is created or truncated, as the assembler does for its output */
+    if (outputPath && IsSameFile(outputPath, inputPath)) { fprintf(stderr, "output file '%s' is the input file '%s'; refusing to overwrite it\n", outputPath, inputPath); return 2; }
+    if (outputPath && IsSameFile(outputPath, isaPath))   { fprintf(stderr, "output file '%s' is the ISA table '%s'; refusing to overwrite it\n", outputPath, isaPath); return 2; }
+    /* error messages show the image path */
+    sourceName = inputPath;
+    if (!LoadISATable(isaPath)) return 1;
+    guessed = !format;
+    if (guessed) format = DetectImageFormat(inputPath);
+    readOk = strcmp(format, "bin") ? ReadV3Image(inputPath) : ReadBinImage(inputPath);
+    if (!readOk || errorCount) {
+        if (errorCount) fprintf(stderr, "%d error(s); no output written\n", errorCount);
+        /* a guess can be wrong (a v3 file with a damaged first line looks raw), so say how to override it */
+        if (guessed) fprintf(stderr, "%s: read as a %s image, guessed from its first bytes; -f v3 or -f bin overrides the guess\n", inputPath, format);
+        return 1;
+    }
+    /* the source goes to the file, or to standard output; the summary then goes to standard error so
+     * that standard output holds only assembly */
+    out = outputPath ? fopen(outputPath, "w") : stdout;
+    if (!out) { fprintf(stderr, "cannot write '%s'\n", outputPath); return 1; }
+    DisassembleImage(out);
+    /* fclose can fail when the final buffered write does, so its result counts */
+    if (outputPath ? fclose(out) != 0 : fflush(out) != 0) { fprintf(stderr, "cannot write '%s'\n", outputPath ? outputPath : "standard output"); return 1; }
+    fprintf(outputPath ? stdout : stderr, "%s: %d word(s) (%s) -> %s\n", inputPath, image.highestAddress + 1, format, outputPath ? outputPath : "standard output");
+    return 0;
+}
+
+/*
+ * main - assemble the file named on the command line, or with -d disassemble a saved image.
  * Usage: sweet16asm [-i isa.csv] [-o out] [-f v3|bin] [-l listing] input.asm
+ *        sweet16asm -d [-i isa.csv] [-o out.asm] [-f v3|bin] image
  * Steps: read the options, load the ISA table, read the source lines, run the two passes and, only if
  * no error was reported, write the image and print a one-line summary.
  * Returns 0 on success; 1 when a file cannot be read or written or any assembly error was reported
@@ -64,13 +108,14 @@ static void FreeLines(char **lines, int lineCount)
 int main(int argc, char **argv)
 {
     const char *isaPath = "isa.csv", *outputPath = NULL, *format = "v3", *listingPath = NULL, *inputPath = NULL;
-    char **lines = NULL, lineBuffer[LINE_LEN], defaultOutputPath[512]; int lineCount = 0, capacity = 0, argIndex; FILE *sourceFile; bool wroteOutput, wroteListing;
+    char **lines = NULL, lineBuffer[LINE_LEN], defaultOutputPath[512]; int lineCount = 0, capacity = 0, argIndex; FILE *sourceFile; bool wroteOutput, wroteListing, disassemble = false, formatGiven = false;
     AssemblerState state = { NULL };
     /* read the options; the one argument that is not an option is the input file */
     for (argIndex = 1; argIndex < argc; argIndex++) {
         if (!strcmp(argv[argIndex], "-i") && argIndex + 1 < argc) isaPath = argv[++argIndex];
         else if (!strcmp(argv[argIndex], "-o") && argIndex + 1 < argc) outputPath = argv[++argIndex];
-        else if (!strcmp(argv[argIndex], "-f") && argIndex + 1 < argc) format = argv[++argIndex];
+        else if (!strcmp(argv[argIndex], "-f") && argIndex + 1 < argc) { format = argv[++argIndex]; formatGiven = true; }
+        else if (!strcmp(argv[argIndex], "-d")) disassemble = true;
         else if (!strcmp(argv[argIndex], "-l") && argIndex + 1 < argc) listingPath = argv[++argIndex];
         /* an unknown option, an option missing its value, or a second input file is a usage error */
         else if (argv[argIndex][0] == '-' || inputPath) { PrintUsage(); return 2; }
@@ -78,6 +123,11 @@ int main(int argc, char **argv)
     }
     /* an input file is required, and the format must be v3 or bin */
     if (!inputPath || (strcmp(format, "bin") && strcmp(format, "v3"))) { PrintUsage(); return 2; }
+    /* -d is a separate job with its own output rules; a listing makes no sense for it */
+    if (disassemble) {
+        if (listingPath) { PrintUsage(); return 2; }
+        return RunDisassembler(inputPath, isaPath, outputPath, formatGiven ? format : NULL);
+    }
     /* default output name: the input name with its extension replaced by .hex (v3) or .bin;
      * a '.' in a directory name is not an extension. Worked out now so it can be checked below. */
     if (!outputPath) {

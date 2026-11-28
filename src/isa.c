@@ -1,6 +1,8 @@
 /*
  * isa.c - the instruction table. LoadISATable reads isa.csv into a private table at startup and
  * FindISAEntry looks mnemonics up in it. Opcodes and operand layouts come only from this table.
+ * ISAEntryCount/ISAEntryAt let the disassembler walk the table, and ISAFieldMask/ISAFieldShift say
+ * which bits each operand code names.
  */
 #include <stdbool.h>
 #include <stdio.h>
@@ -25,6 +27,45 @@ const ISAEntry *FindISAEntry(const char *mnemonic)
     /* linear search over the loaded entries */
     for (index = 0; index < isaEntryCount; index++) if (EqualsIgnoreCase(isaTable[index].mnemonic, mnemonic)) return &isaTable[index];
     return NULL;
+}
+
+/*
+ * ISAEntryCount - how many instructions are loaded (0 before LoadISATable has succeeded).
+ */
+int ISAEntryCount(void)
+{
+    return isaEntryCount;
+}
+
+/*
+ * ISAEntryAt - the loaded instruction at position index, counted in file order from 0.
+ * index: must be 0 .. ISAEntryCount() - 1. The table does not change after LoadISATable returns.
+ */
+const ISAEntry *ISAEntryAt(int index)
+{
+    return &isaTable[index];
+}
+
+/*
+ * ISAFieldShift - how far the field named by an operand code is shifted up from bit 0:
+ * d = 6, a = 3, b = 0, and i = 0 (the 6-bit immediate occupies bits 5:0).
+ * code: one of d, a, b, i.
+ */
+int ISAFieldShift(char code)
+{
+    return code == 'd' ? FIELD_D_SHIFT : code == 'a' ? FIELD_A_SHIFT : FIELD_B_SHIFT;
+}
+
+/*
+ * ISAFieldMask - the bits of an instruction word that an operand code names, already in place:
+ * d = bits 8:6, a = bits 5:3, b = bits 2:0, i = bits 5:0.
+ * code: one of d, a, b, i. Returns 0 for any other code.
+ */
+unsigned ISAFieldMask(char code)
+{
+    if (code == 'i') return IMM_MASK;
+    if (code == 'd' || code == 'a' || code == 'b') return REG_MASK << ISAFieldShift(code);
+    return 0;
 }
 
 /*
