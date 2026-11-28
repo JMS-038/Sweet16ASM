@@ -54,10 +54,6 @@ jobs:
 
       - name: Run test suite under sanitizers
         env:
-          # Leak checking is off for now: main() never frees its line buffer and
-          # strings at exit, which LeakSanitizer reports. Remove this line after
-          # those allocations are freed.
-          ASAN_OPTIONS: detect_leaks=0
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: make test
 
